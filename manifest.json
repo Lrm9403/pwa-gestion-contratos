@@ -1,0 +1,54 @@
+{
+  "name": "Gestión de Contratos y Salarios",
+  "short_name": "GestiónContratos",
+  "description": "Aplicación PWA para gestión de contratos, facturas, pagos y salarios",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2c3e50",
+  "theme_color": "#3498db",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Nuevo Contrato",
+      "short_name": "Contrato",
+      "description": "Crear nuevo contrato",
+      "url": "/?section=contratos",
+      "icons": [{ "src": "/icons/contract-icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Registrar Pago",
+      "short_name": "Pago",
+      "description": "Registrar nuevo pago",
+      "url": "/?section=pagos",
+      "icons": [{ "src": "/icons/payment-icon.png", "sizes": "96x96" }]
+    }
+  ]
+}
