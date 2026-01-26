@@ -28,11 +28,13 @@
                 <h2>Iniciar Sesión</h2>
                 <div class="form-group">
                     <label for="login-email">Email:</label>
-                    <input type="email" id="login-email" placeholder="usuario@ejemplo.com" required>
+                    <input type="email" id="login-email" placeholder="usuario@ejemplo.com" required 
+                           autocomplete="email">
                 </div>
                 <div class="form-group">
                     <label for="login-password">Contraseña:</label>
-                    <input type="password" id="login-password" placeholder="••••••••" required>
+                    <input type="password" id="login-password" placeholder="••••••••" required 
+                           autocomplete="current-password">
                 </div>
                 <button type="submit" id="login-btn" class="btn btn-primary">Ingresar</button>
                 <p class="register-link">¿No tienes cuenta? <a href="#" id="show-register">Regístrate</a></p>
@@ -51,19 +53,23 @@
                 <h2>Registro</h2>
                 <div class="form-group">
                     <label for="register-name">Nombre:</label>
-                    <input type="text" id="register-name" placeholder="Tu nombre" required>
+                    <input type="text" id="register-name" placeholder="Tu nombre" required
+                           autocomplete="name">
                 </div>
                 <div class="form-group">
                     <label for="register-email">Email:</label>
-                    <input type="email" id="register-email" placeholder="usuario@ejemplo.com" required>
+                    <input type="email" id="register-email" placeholder="usuario@ejemplo.com" required
+                           autocomplete="email">
                 </div>
                 <div class="form-group">
                     <label for="register-password">Contraseña:</label>
-                    <input type="password" id="register-password" placeholder="••••••••" required>
+                    <input type="password" id="register-password" placeholder="••••••••" required
+                           autocomplete="new-password">
                 </div>
                 <div class="form-group">
                     <label for="register-confirm">Confirmar Contraseña:</label>
-                    <input type="password" id="register-confirm" placeholder="••••••••" required>
+                    <input type="password" id="register-confirm" placeholder="••••••••" required
+                           autocomplete="new-password">
                 </div>
                 <button type="submit" id="register-btn" class="btn btn-primary">Crear Cuenta</button>
                 <p class="register-link">¿Ya tienes cuenta? <a href="#" id="show-login">Inicia Sesión</a></p>
@@ -106,6 +112,9 @@
                 <li class="menu-item active" data-section="dashboard">
                     <i class="fas fa-home"></i> Dashboard
                 </li>
+                <li class="menu-item" data-section="companies">
+                    <i class="fas fa-building"></i> Empresas
+                </li>
                 <li class="menu-item" data-section="contracts">
                     <i class="fas fa-file-contract"></i> Contratos
                 </li>
@@ -115,14 +124,11 @@
                 <li class="menu-item" data-section="invoices">
                     <i class="fas fa-receipt"></i> Facturas
                 </li>
-                <li class="menu-item" data-section="payments">
-                    <i class="fas fa-money-bill-wave"></i> Pagos de Salario
-                </li>
                 <li class="menu-item" data-section="salary">
                     <i class="fas fa-wallet"></i> Salarios
                 </li>
-                <li class="menu-item" data-section="companies">
-                    <i class="fas fa-building"></i> Empresas
+                <li class="menu-item" data-section="payments">
+                    <i class="fas fa-money-bill-wave"></i> Pagos
                 </li>
                 <li class="menu-item" data-section="tools">
                     <i class="fas fa-tools"></i> Herramientas
@@ -161,7 +167,26 @@
                 </div>
                 <div class="recent-activity">
                     <h3>Actividad Reciente</h3>
-                    <div id="activity-list" class="activity-list"></div>
+                    <div id="activity-list" class="activity-list">
+                        <p style="text-align: center; color: #666;">No hay actividad reciente</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Empresas -->
+            <section id="companies-section" class="content-section">
+                <div class="section-header">
+                    <h2>Mis Empresas</h2>
+                    <button id="add-company" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nueva Empresa
+                    </button>
+                </div>
+                <div class="companies-grid" id="companies-list">
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                        <i class="fas fa-building" style="font-size: 3rem; color: #ccc; margin-bottom: 20px;"></i>
+                        <h3>No hay empresas registradas</h3>
+                        <p>Haz clic en "Nueva Empresa" para agregar una</p>
+                    </div>
                 </div>
             </section>
 
@@ -187,7 +212,11 @@
                             </tr>
                         </thead>
                         <tbody id="contracts-list">
-                            <!-- Contratos se cargarán aquí -->
+                            <tr>
+                                <td colspan="7" style="text-align: center; padding: 20px;">
+                                    No hay contratos registrados. Haz clic en "Nuevo Contrato" para agregar uno.
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -214,7 +243,11 @@
                             </tr>
                         </thead>
                         <tbody id="certifications-list">
-                            <!-- Certificaciones se cargarán aquí -->
+                            <tr>
+                                <td colspan="6" style="text-align: center; padding: 20px;">
+                                    No hay certificaciones registradas. Haz clic en "Nueva Certificación" para agregar una.
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -241,34 +274,11 @@
                             </tr>
                         </thead>
                         <tbody id="invoices-list">
-                            <!-- Facturas se cargarán aquí -->
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <!-- Pagos de Salario -->
-            <section id="payments-section" class="content-section">
-                <div class="section-header">
-                    <h2>Pagos de Salario</h2>
-                    <button id="add-payment" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Nuevo Pago
-                    </button>
-                </div>
-                <div class="table-container">
-                    <table id="payments-table">
-                        <thead>
                             <tr>
-                                <th>Fecha</th>
-                                <th>Contrato</th>
-                                <th>Certificación</th>
-                                <th>Monto</th>
-                                <th>Método</th>
-                                <th>Acciones</th>
+                                <td colspan="6" style="text-align: center; padding: 20px;">
+                                    No hay facturas registradas. Haz clic en "Nueva Factura" para agregar una.
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody id="payments-list">
-                            <!-- Pagos se cargarán aquí -->
                         </tbody>
                     </table>
                 </div>
@@ -303,23 +313,45 @@
                                 </tr>
                             </thead>
                             <tbody id="salary-list">
-                                <!-- Detalles de salario se cargarán aquí -->
+                                <tr>
+                                    <td colspan="5" style="text-align: center; padding: 20px;">
+                                        No hay datos de salarios disponibles.
+                                    </td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
             </section>
 
-            <!-- Empresas -->
-            <section id="companies-section" class="content-section">
+            <!-- Pagos -->
+            <section id="payments-section" class="content-section">
                 <div class="section-header">
-                    <h2>Mis Empresas</h2>
-                    <button id="add-company" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Nueva Empresa
+                    <h2>Pagos de Salario</h2>
+                    <button id="add-payment" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nuevo Pago
                     </button>
                 </div>
-                <div class="companies-grid" id="companies-list">
-                    <!-- Empresas se cargarán aquí -->
+                <div class="table-container">
+                    <table id="payments-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Contrato</th>
+                                <th>Certificación</th>
+                                <th>Monto</th>
+                                <th>Método</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="payments-list">
+                            <tr>
+                                <td colspan="6" style="text-align: center; padding: 20px;">
+                                    No hay pagos registrados. Haz clic en "Nuevo Pago" para agregar uno.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
@@ -370,11 +402,11 @@
     <!-- Scripts -->
     <script src="data/database.js"></script>
     <script src="modules/auth.js"></script>
+    <script src="modules/companies.js"></script>
     <script src="modules/contracts.js"></script>
     <script src="modules/certifications.js"></script>
-    <script src="modules/invoices.js"></script>
-    <script src="modules/payments.js"></script>
     <script src="modules/salary.js"></script>
+    <script src="modules/payments.js"></script>
     <script src="modules/backup.js"></script>
     <script src="modules/export.js"></script>
     <script src="app.js"></script>
