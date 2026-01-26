@@ -1,27 +1,31 @@
 // Inicialización de la aplicación
 class ContractManagerApp {
     constructor() {
-        this.init();
+        this.initPromise = this.init();
     }
 
     async init() {
-        // Esperar a que la base de datos se inicialice
-        await db.init;
-        
-        // Configurar navegación
-        this.setupNavigation();
-        
-        // Configurar modal
-        this.setupModal();
-        
-        // Configurar gestión de conexión
-        this.setupConnectionManager();
-        
-        // Cargar empresas del usuario
-        this.loadUserCompanies();
-        
-        // Inicializar Select2
-        this.initSelect2();
+        try {
+            // Esperar a que la base de datos se inicialice
+            await db.ready();
+            console.log('Base de datos lista');
+            
+            // Configurar navegación
+            this.setupNavigation();
+            
+            // Configurar modal
+            this.setupModal();
+            
+            // Configurar gestión de conexión
+            this.setupConnectionManager();
+            
+            // Configurar formularios
+            this.setupForms();
+            
+        } catch (error) {
+            console.error('Error al inicializar la aplicación:', error);
+            this.showMessage('Error al inicializar la aplicación. Recarga la página.', 'error');
+        }
     }
 
     setupNavigation() {
@@ -41,6 +45,11 @@ class ContractManagerApp {
         document.getElementById('menu-toggle')?.addEventListener('click', () => {
             document.querySelector('.sidebar').classList.toggle('active');
         });
+        
+        // Seleccionar empresa
+        document.getElementById('company-select')?.addEventListener('change', (e) => {
+            this.selectCompany(e.target.value);
+        });
     }
 
     showSection(sectionId) {
@@ -53,6 +62,19 @@ class ContractManagerApp {
         if (targetSection) {
             targetSection.classList.add('active');
         }
+        
+        // Cargar datos si es necesario
+        if (sectionId === 'contracts' && window.contracts) {
+            contracts.loadContracts();
+        } else if (sectionId === 'certifications' && window.certifications) {
+            certifications.loadCertifications();
+        } else if (sectionId === 'payments' && window.payments) {
+            payments.loadPayments();
+        } else if (sectionId === 'salary' && window.salary) {
+            salary.updateSalarySummary();
+        } else if (sectionId === 'companies') {
+            this.loadCompanies();
+        }
     }
 
     setupModal() {
@@ -61,6 +83,7 @@ class ContractManagerApp {
         const modalBody = document.getElementById('modal-body');
         const modalClose = document.getElementById('modal-close');
         const modalCancel = document.getElementById('modal-cancel');
+        const modalSave = document.getElementById('modal-save');
         
         let currentOnSave = null;
         
@@ -70,6 +93,16 @@ class ContractManagerApp {
                 modalBody.innerHTML = body;
                 currentOnSave = onSave;
                 modal.classList.add('active');
+                
+                // Inicializar Select2 en los select del modal
+                setTimeout(() => {
+                    if (window.$) {
+                        $('#modal select').select2({
+                            width: '100%',
+                            dropdownParent: $('#modal')
+                        });
+                    }
+                }, 100);
             },
             
             hide: () => {
@@ -79,21 +112,25 @@ class ContractManagerApp {
             }
         };
         
-        modalClose.addEventListener('click', () => window.modal.hide());
-        modalCancel.addEventListener('click', () => window.modal.hide());
+        if (modalClose) modalClose.addEventListener('click', () => window.modal.hide());
+        if (modalCancel) modalCancel.addEventListener('click', () => window.modal.hide());
         
-        document.getElementById('modal-save')?.addEventListener('click', () => {
-            if (currentOnSave) {
-                currentOnSave();
-            }
-        });
+        if (modalSave) {
+            modalSave.addEventListener('click', () => {
+                if (currentOnSave) {
+                    currentOnSave();
+                }
+            });
+        }
         
         // Cerrar modal al hacer clic fuera
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                window.modal.hide();
-            }
-        });
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    window.modal.hide();
+                }
+            });
+        }
     }
 
     setupConnectionManager() {
@@ -104,16 +141,20 @@ class ContractManagerApp {
             const isOnline = navigator.onLine;
             
             if (isOnline) {
-                connectionIcon.className = 'fas fa-wifi';
-                connectionStatus.textContent = 'En línea';
-                connectionStatus.style.color = 'var(--success-color)';
+                if (connectionIcon) connectionIcon.className = 'fas fa-wifi';
+                if (connectionStatus) {
+                    connectionStatus.textContent = 'En línea';
+                    connectionStatus.style.color = 'var(--success-color)';
+                }
                 
                 // Intentar sincronizar datos pendientes
                 this.syncPendingData();
             } else {
-                connectionIcon.className = 'fas fa-wifi-slash';
-                connectionStatus.textContent = 'Sin conexión';
-                connectionStatus.style.color = 'var(--danger-color)';
+                if (connectionIcon) connectionIcon.className = 'fas fa-wifi-slash';
+                if (connectionStatus) {
+                    connectionStatus.textContent = 'Sin conexión';
+                    connectionStatus.style.color = 'var(--danger-color)';
+                }
             }
         };
         
@@ -129,7 +170,7 @@ class ContractManagerApp {
         try {
             // En una implementación real, aquí se sincronizarían los datos
             // con un servidor backend
-            console.log('Sincronizando datos...');
+            console.log('Sincronizando datos pendientes...');
             
             // Por ahora, solo marcamos las actividades como sincronizadas
             const activities = await db.getAll('activities');
@@ -142,26 +183,41 @@ class ContractManagerApp {
                 });
             }
             
+            console.log('Datos sincronizados');
+            
         } catch (error) {
             console.error('Error al sincronizar datos:', error);
         }
     }
 
-    async loadUserCompanies() {
+    setupForms() {
+        // Prevenir envío de formularios por defecto
+        const loginForm = document.getElementById('login-form');
+        const registerForm = document.getElementById('register-form');
+        
+        if (loginForm) {
+            loginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (window.auth) auth.login();
+            });
+        }
+        
+        if (registerForm) {
+            registerForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (window.auth) auth.register();
+            });
+        }
+    }
+
+    async loadCompanies() {
         if (!auth.currentUser) return;
         
         try {
             const companies = await db.getCompaniesByUser(auth.currentUser.id);
-            
-            // Guardar en localStorage para acceso rápido
             localStorage.setItem('userCompanies', JSON.stringify(companies));
-            
-            // Actualizar selector
-            this.updateCompanySelector(companies);
-            
-            // Mostrar lista de empresas
             this.renderCompaniesList(companies);
-            
+            this.updateCompanySelector(companies);
         } catch (error) {
             console.error('Error al cargar empresas:', error);
         }
@@ -169,7 +225,9 @@ class ContractManagerApp {
 
     updateCompanySelector(companies) {
         const select = document.getElementById('company-select');
-        select.innerHTML = '';
+        if (!select) return;
+        
+        select.innerHTML = '<option value="">Seleccionar empresa</option>';
         
         companies.forEach(company => {
             const option = document.createElement('option');
@@ -178,20 +236,34 @@ class ContractManagerApp {
             select.appendChild(option);
         });
         
-        // Si hay empresas, seleccionar la primera
-        if (companies.length > 0 && !contracts.currentCompany) {
-            contracts.currentCompany = companies[0];
-            localStorage.setItem('currentCompany', JSON.stringify(companies[0]));
-            contracts.updateCompanyUI();
-            contracts.loadContracts();
-            certifications.loadCertifications();
-            salary.updateSalarySummary();
+        // Seleccionar empresa actual si existe
+        const currentCompany = localStorage.getItem('currentCompany');
+        if (currentCompany) {
+            try {
+                const parsed = JSON.parse(currentCompany);
+                select.value = parsed.id;
+            } catch (e) {
+                console.error('Error al parsear empresa actual:', e);
+            }
         }
     }
 
     renderCompaniesList(companies) {
         const container = document.getElementById('companies-list');
+        if (!container) return;
+        
         container.innerHTML = '';
+        
+        if (companies.length === 0) {
+            container.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                    <i class="fas fa-building" style="font-size: 3rem; color: #ccc; margin-bottom: 20px;"></i>
+                    <h3>No hay empresas registradas</h3>
+                    <p>Haz clic en "Nueva Empresa" para agregar una</p>
+                </div>
+            `;
+            return;
+        }
         
         companies.forEach(company => {
             const card = document.createElement('div');
@@ -219,16 +291,33 @@ class ContractManagerApp {
     }
 
     async selectCompany(companyId) {
-        const companies = JSON.parse(localStorage.getItem('userCompanies') || '[]');
-        contracts.currentCompany = companies.find(c => c.id === companyId);
-        
-        if (contracts.currentCompany) {
-            localStorage.setItem('currentCompany', JSON.stringify(contracts.currentCompany));
-            contracts.updateCompanyUI();
-            contracts.loadContracts();
-            certifications.loadCertifications();
-            salary.updateSalarySummary();
-            this.showSection('dashboard');
+        try {
+            const company = await db.get('companies', companyId);
+            if (company) {
+                // Actualizar en localStorage
+                localStorage.setItem('currentCompany', JSON.stringify(company));
+                
+                // Actualizar en módulos
+                if (window.contracts) {
+                    contracts.currentCompany = company;
+                    contracts.updateCompanyUI();
+                    contracts.loadContracts();
+                }
+                
+                if (window.certifications) certifications.loadCertifications();
+                if (window.payments) payments.loadPayments();
+                if (window.salary) salary.updateSalarySummary();
+                
+                // Actualizar selector
+                const select = document.getElementById('company-select');
+                if (select) select.value = companyId;
+                
+                // Mostrar dashboard
+                this.showSection('dashboard');
+            }
+        } catch (error) {
+            console.error('Error al seleccionar empresa:', error);
+            this.showMessage('Error al seleccionar empresa', 'error');
         }
     }
 
@@ -245,7 +334,7 @@ class ContractManagerApp {
             </div>
             <div class="form-group">
                 <label for="company-address">Dirección:</label>
-                <input type="text" id="company-address" value="${company?.address || ''}">
+                <textarea id="company-address" rows="2">${company?.address || ''}</textarea>
             </div>
             <div class="form-group">
                 <label for="company-phone">Teléfono:</label>
@@ -265,45 +354,64 @@ class ContractManagerApp {
     }
 
     async saveCompany(id = null) {
+        const name = document.getElementById('company-name').value.trim();
+        const taxId = document.getElementById('company-taxId').value.trim();
+        const address = document.getElementById('company-address').value.trim();
+        const phone = document.getElementById('company-phone').value.trim();
+        const email = document.getElementById('company-email').value.trim();
+        
+        if (!name) {
+            this.showMessage('El nombre de la empresa es requerido', 'error');
+            return;
+        }
+        
         const company = {
-            name: document.getElementById('company-name').value,
-            taxId: document.getElementById('company-taxId').value,
-            address: document.getElementById('company-address').value,
-            phone: document.getElementById('company-phone').value,
-            email: document.getElementById('company-email').value,
+            name,
+            taxId,
+            address,
+            phone,
+            email,
             userId: auth.currentUser.id,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
         
-        if (!company.name) {
-            auth.showMessage('El nombre de la empresa es requerido', 'error');
-            return;
-        }
-        
         try {
             if (id) {
-                await db.update('companies', id, company);
-                auth.showMessage('Empresa actualizada exitosamente', 'success');
+                const existing = await db.get('companies', id);
+                if (existing) {
+                    company.createdAt = existing.createdAt;
+                    await db.update('companies', id, company);
+                    this.showMessage('Empresa actualizada exitosamente', 'success');
+                }
             } else {
                 await db.add('companies', company);
-                auth.showMessage('Empresa creada exitosamente', 'success');
+                this.showMessage('Empresa creada exitosamente', 'success');
             }
             
             modal.hide();
-            this.loadUserCompanies();
+            await this.loadCompanies();
+            
+            // Si es la primera empresa, seleccionarla automáticamente
+            if (!id && !localStorage.getItem('currentCompany')) {
+                const companies = await db.getCompaniesByUser(auth.currentUser.id);
+                const newCompany = companies.find(c => c.name === name);
+                if (newCompany) {
+                    this.selectCompany(newCompany.id);
+                }
+            }
             
             // Registrar actividad
             await db.addActivity({
                 userId: auth.currentUser.id,
                 companyId: id || company.id,
                 type: id ? 'company_update' : 'company_create',
-                description: `${id ? 'Actualizada' : 'Creada'} empresa ${company.name}`
+                description: `${id ? 'Actualizada' : 'Creada'} empresa ${name}`
             });
             
         } catch (error) {
-            auth.showMessage('Error al guardar la empresa', 'error');
-            console.error(error);
+            console.error('Error al guardar empresa:', error);
+            this.showMessage('Error al guardar la empresa: ' + error.message, 'error');
         }
     }
 
@@ -312,25 +420,26 @@ class ContractManagerApp {
             const company = await db.get('companies', id);
             if (company) {
                 this.showCompanyForm(company);
+            } else {
+                this.showMessage('Empresa no encontrada', 'error');
             }
         } catch (error) {
             console.error('Error al cargar empresa:', error);
+            this.showMessage('Error al cargar la empresa', 'error');
         }
     }
 
-    initSelect2() {
-        // Inicializar Select2 en todos los select
-        setTimeout(() => {
-            $('select').select2({
-                width: '100%',
-                dropdownParent: $('#modal')
-            });
-        }, 100);
+    showMessage(message, type) {
+        if (window.auth && auth.showMessage) {
+            auth.showMessage(message, type);
+        } else {
+            alert(message);
+        }
     }
 }
 
 // Registrar Service Worker
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js')
             .then(registration => {
@@ -340,7 +449,18 @@ if ('serviceWorker' in navigator) {
                 console.log('Error al registrar ServiceWorker:', error);
             });
     });
+} else {
+    console.log('ServiceWorker no soportado o no en HTTPS');
 }
 
 // Inicializar aplicación
-const app = new ContractManagerApp();
+let app;
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        app = new ContractManagerApp();
+        window.app = app;
+        await app.initPromise;
+    } catch (error) {
+        console.error('Error al inicializar aplicación:', error);
+    }
+});
