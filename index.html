@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Contratos y Pagos</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+</head>
+<body>
+    <!-- Pantalla de Login -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="logo">
+                <i class="fas fa-file-contract"></i>
+                <h1>Gestor de Contratos</h1>
+            </div>
+            <div class="login-form">
+                <h2>Iniciar Sesión</h2>
+                <div class="form-group">
+                    <label for="login-email">Email:</label>
+                    <input type="email" id="login-email" placeholder="usuario@ejemplo.com">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Contraseña:</label>
+                    <input type="password" id="login-password" placeholder="••••••••">
+                </div>
+                <button id="login-btn" class="btn btn-primary">Ingresar</button>
+                <p class="register-link">¿No tienes cuenta? <a href="#" id="show-register">Regístrate</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pantalla de Registro -->
+    <div id="register-screen" class="screen">
+        <div class="login-container">
+            <div class="logo">
+                <i class="fas fa-file-contract"></i>
+                <h1>Crear Cuenta</h1>
+            </div>
+            <div class="login-form">
+                <h2>Registro</h2>
+                <div class="form-group">
+                    <label for="register-name">Nombre:</label>
+                    <input type="text" id="register-name" placeholder="Tu nombre">
+                </div>
+                <div class="form-group">
+                    <label for="register-email">Email:</label>
+                    <input type="email" id="register-email" placeholder="usuario@ejemplo.com">
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Contraseña:</label>
+                    <input type="password" id="register-password" placeholder="••••••••">
+                </div>
+                <div class="form-group">
+                    <label for="register-confirm">Confirmar Contraseña:</label>
+                    <input type="password" id="register-confirm" placeholder="••••••••">
+                </div>
+                <button id="register-btn" class="btn btn-primary">Crear Cuenta</button>
+                <p class="register-link">¿Ya tienes cuenta? <a href="#" id="show-login">Inicia Sesión</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Aplicación Principal -->
+    <div id="app-screen" class="screen">
+        <!-- Barra de Navegación -->
+        <nav class="navbar">
+            <div class="nav-left">
+                <button id="menu-toggle" class="nav-btn">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h1 class="app-title">Gestor de Contratos</h1>
+            </div>
+            <div class="nav-right">
+                <div class="company-selector">
+                    <select id="company-select"></select>
+                </div>
+                <div class="user-menu">
+                    <span id="user-name"></span>
+                    <button id="logout-btn" class="nav-btn">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h3><i class="fas fa-building"></i> Empresa</h3>
+                <span id="current-company">No seleccionada</span>
+            </div>
+            <ul class="sidebar-menu">
+                <li class="menu-item active" data-section="dashboard">
+                    <i class="fas fa-home"></i> Dashboard
+                </li>
+                <li class="menu-item" data-section="contracts">
+                    <i class="fas fa-file-contract"></i> Contratos
+                </li>
+                <li class="menu-item" data-section="certifications">
+                    <i class="fas fa-certificate"></i> Certificaciones
+                </li>
+                <li class="menu-item" data-section="invoices">
+                    <i class="fas fa-receipt"></i> Facturas
+                </li>
+                <li class="menu-item" data-section="payments">
+                    <i class="fas fa-money-bill-wave"></i> Pagos
+                </li>
+                <li class="menu-item" data-section="salary">
+                    <i class="fas fa-wallet"></i> Salarios
+                </li>
+                <li class="menu-item" data-section="companies">
+                    <i class="fas fa-building"></i> Empresas
+                </li>
+                <li class="menu-item" data-section="tools">
+                    <i class="fas fa-tools"></i> Herramientas
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="connection-status">
+                    <i class="fas fa-wifi" id="connection-icon"></i>
+                    <span id="connection-status">En línea</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contenido Principal -->
+        <main class="main-content">
+            <!-- Dashboard -->
+            <section id="dashboard-section" class="content-section active">
+                <h2>Dashboard</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Contratos Activos</h3>
+                        <p id="active-contracts">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Certificaciones Pendientes</h3>
+                        <p id="pending-certs">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Salario por Pagar</h3>
+                        <p id="salary-to-pay">$0.00</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Salario Pagado</h3>
+                        <p id="salary-paid">$0.00</p>
+                    </div>
+                </div>
+                <div class="recent-activity">
+                    <h3>Actividad Reciente</h3>
+                    <div id="activity-list" class="activity-list"></div>
+                </div>
+            </section>
+
+            <!-- Contratos -->
+            <section id="contracts-section" class="content-section">
+                <div class="section-header">
+                    <h2>Contratos</h2>
+                    <button id="add-contract" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nuevo Contrato
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table id="contracts-table">
+                        <thead>
+                            <tr>
+                                <th>Código</th>
+                                <th>Cliente</th>
+                                <th>Valor Servicio</th>
+                                <th>Valor Contrato (+15%)</th>
+                                <th>% Salario</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="contracts-list">
+                            <!-- Contratos se cargarán aquí -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Certificaciones -->
+            <section id="certifications-section" class="content-section">
+                <div class="section-header">
+                    <h2>Certificaciones Mensuales</h2>
+                    <button id="add-certification" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nueva Certificación
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table id="certifications-table">
+                        <thead>
+                            <tr>
+                                <th>Contrato</th>
+                                <th>Mes/Año</th>
+                                <th>Monto Certificado</th>
+                                <th>Salario Generado</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="certifications-list">
+                            <!-- Certificaciones se cargarán aquí -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Facturas -->
+            <section id="invoices-section" class="content-section">
+                <div class="section-header">
+                    <h2>Facturas</h2>
+                    <button id="add-invoice" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nueva Factura
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table id="invoices-table">
+                        <thead>
+                            <tr>
+                                <th>Número</th>
+                                <th>Contrato</th>
+                                <th>Fecha</th>
+                                <th>Monto</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="invoices-list">
+                            <!-- Facturas se cargarán aquí -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Pagos -->
+            <section id="payments-section" class="content-section">
+                <div class="section-header">
+                    <h2>Pagos</h2>
+                    <button id="add-payment" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Registrar Pago
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table id="payments-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Concepto</th>
+                                <th>Monto</th>
+                                <th>Certificación</th>
+                                <th>Método</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="payments-list">
+                            <!-- Pagos se cargarán aquí -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Salarios -->
+            <section id="salary-section" class="content-section">
+                <div class="section-header">
+                    <h2>Salarios</h2>
+                </div>
+                <div class="salary-summary">
+                    <div class="summary-card">
+                        <h3>Salario Total por Pagar</h3>
+                        <p id="total-salary-due">$0.00</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Salario Total Pagado</h3>
+                        <p id="total-salary-paid">$0.00</p>
+                    </div>
+                </div>
+                <div class="salary-details">
+                    <h3>Detalle por Contrato</h3>
+                    <div class="table-container">
+                        <table id="salary-table">
+                            <thead>
+                                <tr>
+                                    <th>Contrato</th>
+                                    <th>Salario Generado</th>
+                                    <th>Salario Pagado</th>
+                                    <th>Salario Pendiente</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="salary-list">
+                                <!-- Detalles de salario se cargarán aquí -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Empresas -->
+            <section id="companies-section" class="content-section">
+                <div class="section-header">
+                    <h2>Mis Empresas</h2>
+                    <button id="add-company" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nueva Empresa
+                    </button>
+                </div>
+                <div class="companies-grid" id="companies-list">
+                    <!-- Empresas se cargarán aquí -->
+                </div>
+            </section>
+
+            <!-- Herramientas -->
+            <section id="tools-section" class="content-section">
+                <h2>Herramientas</h2>
+                <div class="tools-grid">
+                    <div class="tool-card" id="export-excel">
+                        <i class="fas fa-file-excel"></i>
+                        <h3>Exportar a Excel</h3>
+                        <p>Exporta todos los datos a formato Excel</p>
+                    </div>
+                    <div class="tool-card" id="export-pdf">
+                        <i class="fas fa-file-pdf"></i>
+                        <h3>Exportar a PDF</h3>
+                        <p>Genera reportes en formato PDF</p>
+                    </div>
+                    <div class="tool-card" id="backup-export">
+                        <i class="fas fa-download"></i>
+                        <h3>Crear Copia de Seguridad</h3>
+                        <p>Descarga una copia de todos los datos</p>
+                    </div>
+                    <div class="tool-card" id="backup-import">
+                        <i class="fas fa-upload"></i>
+                        <h3>Restaurar Copia</h3>
+                        <p>Importa datos desde una copia de seguridad</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal Genérico -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <button id="modal-close" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer">
+                <button id="modal-cancel" class="btn btn-secondary">Cancelar</button>
+                <button id="modal-save" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="data/database.js"></script>
+    <script src="modules/auth.js"></script>
+    <script src="modules/contracts.js"></script>
+    <script src="modules/certifications.js"></script>
+    <script src="modules/invoices.js"></script>
+    <script src="modules/payments.js"></script>
+    <script src="modules/salary.js"></script>
+    <script src="modules/backup.js"></script>
+    <script src="modules/export.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
