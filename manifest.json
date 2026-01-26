@@ -2,17 +2,10 @@
     "name": "Gestor de Contratos y Pagos",
     "short_name": "GestorContratos",
     "description": "Aplicación para gestionar contratos, facturas, pagos y salarios",
-    "start_url": "./index.html",
+    "start_url": "./",
     "display": "standalone",
     "background_color": "#ffffff",
     "theme_color": "#1a237e",
-    "orientation": "portrait-primary",
-    "icons": [
-        {
-            "src": "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-contract.svg",
-            "sizes": "any",
-            "type": "image/svg+xml",
-            "purpose": "any"
-        }
-    ]
+    "orientation": "portrait",
+    "icons": []
 }
