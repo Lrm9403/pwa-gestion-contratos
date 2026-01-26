@@ -8,44 +8,76 @@ class Contracts {
         document.getElementById('add-contract')?.addEventListener('click', () => this.showContractForm());
         document.getElementById('company-select')?.addEventListener('change', (e) => this.onCompanyChange(e));
         
-        // Cargar empresa actual
-        const savedCompany = localStorage.getItem('currentCompany');
-        if (savedCompany) {
-            this.currentCompany = JSON.parse(savedCompany);
-            this.updateCompanyUI();
-            this.loadContracts();
+        // Cargar empresa actual del localStorage
+        this.loadCurrentCompany();
+    }
+
+    loadCurrentCompany() {
+        try {
+            const savedCompany = localStorage.getItem('currentCompany');
+            if (savedCompany) {
+                this.currentCompany = JSON.parse(savedCompany);
+                this.updateCompanyUI();
+                this.loadContracts();
+            }
+        } catch (error) {
+            console.error('Error al cargar empresa:', error);
+            this.currentCompany = null;
         }
     }
 
     async loadContracts() {
-        if (!this.currentCompany || !auth.currentUser) return;
+        if (!this.currentCompany || !auth.currentUser) {
+            console.log('No hay empresa seleccionada o usuario no autenticado');
+            return;
+        }
         
         try {
+            console.log('Cargando contratos para empresa:', this.currentCompany.id);
             const contracts = await db.getAll('contracts', 'companyId', this.currentCompany.id);
+            console.log('Contratos encontrados:', contracts);
             this.renderContracts(contracts);
             this.updateDashboard();
         } catch (error) {
             console.error('Error al cargar contratos:', error);
+            this.showMessage('Error al cargar contratos', 'error');
         }
     }
 
     renderContracts(contracts) {
         const tbody = document.getElementById('contracts-list');
+        if (!tbody) return;
+        
         tbody.innerHTML = '';
         
+        if (contracts.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="7" style="text-align: center; padding: 20px;">
+                    No hay contratos registrados. Haz clic en "Nuevo Contrato" para agregar uno.
+                </td>
+            `;
+            tbody.appendChild(row);
+            return;
+        }
+        
         contracts.forEach(contract => {
-            const serviceValue = parseFloat(contract.serviceValue);
+            const serviceValue = parseFloat(contract.serviceValue) || 0;
             const contractValue = serviceValue * 1.15; // +15%
             const salaryPercentage = contract.salaryPercentage || 0;
             
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${contract.code}</td>
-                <td>${contract.client}</td>
+                <td>${contract.code || 'N/A'}</td>
+                <td>${contract.client || 'N/A'}</td>
                 <td>$${serviceValue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                 <td>$${contractValue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                 <td>${salaryPercentage}%</td>
-                <td><span class="status ${contract.status}">${contract.status}</span></td>
+                <td>
+                    <span class="status ${contract.status || 'activo'}">
+                        ${contract.status || 'activo'}
+                    </span>
+                </td>
                 <td>
                     <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')">
                         <i class="fas fa-edit"></i>
@@ -60,11 +92,17 @@ class Contracts {
     }
 
     showContractForm(contract = null) {
+        if (!this.currentCompany) {
+            this.showMessage('Primero selecciona una empresa', 'error');
+            return;
+        }
+        
         const title = contract ? 'Editar Contrato' : 'Nuevo Contrato';
         const form = `
             <div class="form-group">
                 <label for="contract-code">Código:</label>
                 <input type="text" id="contract-code" value="${contract?.code || ''}" required>
+                <small>Código único para identificar el contrato</small>
             </div>
             <div class="form-group">
                 <label for="contract-client">Cliente:</label>
@@ -72,11 +110,12 @@ class Contracts {
             </div>
             <div class="form-group">
                 <label for="contract-service-value">Valor del Servicio ($):</label>
-                <input type="number" id="contract-service-value" step="0.01" value="${contract?.serviceValue || ''}" required>
+                <input type="number" id="contract-service-value" step="0.01" min="0" value="${contract?.serviceValue || ''}" required>
+                <small>Valor base del servicio (sin el 15%)</small>
             </div>
             <div class="form-group">
                 <label for="contract-salary-percentage">% de Salario:</label>
-                <input type="number" id="contract-salary-percentage" step="0.01" value="${contract?.salaryPercentage || ''}" required>
+                <input type="number" id="contract-salary-percentage" step="0.01" min="0" max="100" value="${contract?.salaryPercentage || ''}" required>
                 <small>Porcentaje calculado sobre el valor del servicio (sin el 15%)</small>
             </div>
             <div class="form-group">
@@ -90,10 +129,14 @@ class Contracts {
             <div class="form-group">
                 <label for="contract-status">Estado:</label>
                 <select id="contract-status">
-                    <option value="activo" ${contract?.status === 'activo' ? 'selected' : ''}>Activo</option>
+                    <option value="activo" ${(contract?.status || 'activo') === 'activo' ? 'selected' : ''}>Activo</option>
                     <option value="finalizado" ${contract?.status === 'finalizado' ? 'selected' : ''}>Finalizado</option>
                     <option value="suspendido" ${contract?.status === 'suspendido' ? 'selected' : ''}>Suspendido</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label for="contract-description">Descripción (opcional):</label>
+                <textarea id="contract-description" rows="3">${contract?.description || ''}</textarea>
             </div>
         `;
         
@@ -105,36 +148,60 @@ class Contracts {
     }
 
     async saveContract(id = null) {
+        if (!this.currentCompany) {
+            this.showMessage('No hay empresa seleccionada', 'error');
+            return;
+        }
+
         const contract = {
-            code: document.getElementById('contract-code').value,
-            client: document.getElementById('contract-client').value,
+            code: document.getElementById('contract-code').value.trim(),
+            client: document.getElementById('contract-client').value.trim(),
             serviceValue: parseFloat(document.getElementById('contract-service-value').value),
             salaryPercentage: parseFloat(document.getElementById('contract-salary-percentage').value),
             startDate: document.getElementById('contract-start-date').value,
             endDate: document.getElementById('contract-end-date').value,
             status: document.getElementById('contract-status').value,
+            description: document.getElementById('contract-description').value,
             companyId: this.currentCompany.id,
             userId: auth.currentUser.id,
-            createdAt: new Date().toISOString(),
+            createdAt: id ? undefined : new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
         
-        if (!contract.code || !contract.client || isNaN(contract.serviceValue) || isNaN(contract.salaryPercentage)) {
-            auth.showMessage('Por favor completa todos los campos requeridos', 'error');
+        // Validaciones
+        if (!contract.code || !contract.client) {
+            this.showMessage('El código y el cliente son requeridos', 'error');
+            return;
+        }
+        
+        if (isNaN(contract.serviceValue) || contract.serviceValue <= 0) {
+            this.showMessage('El valor del servicio debe ser mayor a 0', 'error');
+            return;
+        }
+        
+        if (isNaN(contract.salaryPercentage) || contract.salaryPercentage < 0 || contract.salaryPercentage > 100) {
+            this.showMessage('El porcentaje de salario debe estar entre 0 y 100', 'error');
             return;
         }
         
         try {
             if (id) {
-                await db.update('contracts', id, contract);
-                auth.showMessage('Contrato actualizado exitosamente', 'success');
+                const existingContract = await db.get('contracts', id);
+                if (existingContract) {
+                    contract.createdAt = existingContract.createdAt;
+                    await db.update('contracts', id, contract);
+                    this.showMessage('Contrato actualizado exitosamente', 'success');
+                } else {
+                    this.showMessage('Contrato no encontrado', 'error');
+                    return;
+                }
             } else {
                 await db.add('contracts', contract);
-                auth.showMessage('Contrato creado exitosamente', 'success');
+                this.showMessage('Contrato creado exitosamente', 'success');
             }
             
             modal.hide();
-            this.loadContracts();
+            await this.loadContracts();
             
             // Registrar actividad
             await db.addActivity({
@@ -145,8 +212,8 @@ class Contracts {
             });
             
         } catch (error) {
-            auth.showMessage('Error al guardar el contrato', 'error');
-            console.error(error);
+            console.error('Error al guardar contrato:', error);
+            this.showMessage('Error al guardar el contrato: ' + error.message, 'error');
         }
     }
 
@@ -155,31 +222,50 @@ class Contracts {
             const contract = await db.get('contracts', id);
             if (contract) {
                 this.showContractForm(contract);
+            } else {
+                this.showMessage('Contrato no encontrado', 'error');
             }
         } catch (error) {
             console.error('Error al cargar contrato:', error);
+            this.showMessage('Error al cargar el contrato', 'error');
         }
     }
 
     async deleteContract(id) {
-        if (!confirm('¿Estás seguro de eliminar este contrato?')) return;
+        if (!confirm('¿Estás seguro de eliminar este contrato? También se eliminarán las certificaciones y pagos asociados.')) {
+            return;
+        }
         
         try {
+            // Primero eliminar certificaciones asociadas
+            const certifications = await db.getAll('certifications', 'contractId', id);
+            for (const cert of certifications) {
+                await db.delete('certifications', cert.id);
+            }
+            
+            // Luego eliminar el contrato
             await db.delete('contracts', id);
-            auth.showMessage('Contrato eliminado exitosamente', 'success');
-            this.loadContracts();
+            this.showMessage('Contrato eliminado exitosamente', 'success');
+            await this.loadContracts();
+            
+            // Actualizar salarios
+            if (window.salary) {
+                salary.updateSalarySummary();
+            }
             
             // Registrar actividad
-            await db.addActivity({
-                userId: auth.currentUser.id,
-                companyId: this.currentCompany.id,
-                type: 'contract_delete',
-                description: 'Eliminado contrato'
-            });
+            if (this.currentCompany) {
+                await db.addActivity({
+                    userId: auth.currentUser.id,
+                    companyId: this.currentCompany.id,
+                    type: 'contract_delete',
+                    description: 'Eliminado contrato'
+                });
+            }
             
         } catch (error) {
-            auth.showMessage('Error al eliminar el contrato', 'error');
-            console.error(error);
+            console.error('Error al eliminar contrato:', error);
+            this.showMessage('Error al eliminar el contrato', 'error');
         }
     }
 
@@ -192,23 +278,46 @@ class Contracts {
             localStorage.setItem('currentCompany', JSON.stringify(this.currentCompany));
             this.updateCompanyUI();
             this.loadContracts();
-            certifications.loadCertifications();
-            payments.loadPayments();
-            salary.updateSalarySummary();
+            
+            // Cargar otros módulos
+            if (window.certifications) certifications.loadCertifications();
+            if (window.payments) payments.loadPayments();
+            if (window.salary) salary.updateSalarySummary();
         }
     }
 
     updateCompanyUI() {
         if (this.currentCompany) {
-            document.getElementById('current-company').textContent = this.currentCompany.name;
+            const element = document.getElementById('current-company');
+            if (element) {
+                element.textContent = this.currentCompany.name;
+            }
             const select = document.getElementById('company-select');
-            select.value = this.currentCompany.id;
+            if (select) {
+                select.value = this.currentCompany.id;
+            }
         }
     }
 
     updateDashboard() {
         // Esta función se implementará para actualizar las estadísticas del dashboard
+        // Por ahora, solo cargamos los contratos
+    }
+
+    showMessage(message, type) {
+        // Usar el sistema de mensajes de auth si está disponible
+        if (window.auth && auth.showMessage) {
+            auth.showMessage(message, type);
+        } else {
+            alert(message);
+        }
     }
 }
 
-const contracts = new Contracts();
+// Inicializar después de que la base de datos esté lista
+let contracts;
+document.addEventListener('DOMContentLoaded', async () => {
+    await db.ready();
+    contracts = new Contracts();
+    window.contracts = contracts;
+});
