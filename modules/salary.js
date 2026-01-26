@@ -4,40 +4,40 @@ class Salary {
     }
 
     init() {
-        // Event listeners para pagos de salario
-        document.addEventListener('paymentAdded', () => this.updateSalarySummary());
+        // Escuchar cambios de empresa
+        document.addEventListener('companyChanged', () => this.updateSalarySummary());
+        
+        // Escuchar eventos de actualización
+        document.addEventListener('contractAdded', () => this.updateSalarySummary());
         document.addEventListener('certificationAdded', () => this.updateSalarySummary());
+        document.addEventListener('paymentAdded', () => this.updateSalarySummary());
     }
 
     async updateSalarySummary() {
-        if (!contracts.currentCompany || !auth.currentUser) return;
+        if (!companies?.currentCompany || !auth.currentUser) {
+            console.log('No hay empresa seleccionada para calcular salarios');
+            return;
+        }
         
         try {
-            const contractsList = await db.getAll('contracts', 'companyId', contracts.currentCompany.id);
-            const certifications = await db.getAll('certifications', 'companyId', contracts.currentCompany.id);
-            const payments = await db.getAll('payments', 'companyId', contracts.currentCompany.id);
+            const contracts = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
+            const certifications = await db.getAll('certifications', 'companyId', companies.currentCompany.id);
+            const payments = await db.getAll('payments', 'companyId', companies.currentCompany.id);
             
             let totalSalaryGenerated = 0;
             let totalSalaryPaid = 0;
             const salaryByContract = [];
             
             // Calcular salario por contrato
-            for (const contract of contractsList) {
+            for (const contract of contracts) {
                 const contractCerts = certifications.filter(c => c.contractId === contract.id);
                 const contractSalary = contractCerts.reduce((sum, cert) => {
                     return sum + (cert.amount * (contract.salaryPercentage / 100));
                 }, 0);
                 
-                const contractPayments = payments.filter(p => {
-                    const cert = certifications.find(c => c.id === p.certificationId);
-                    return cert && cert.contractId === contract.id;
-                });
-                
+                const contractPayments = payments.filter(p => p.contractId === contract.id);
                 const paidSalary = contractPayments.reduce((sum, payment) => {
-                    if (payment.type === 'salary') {
-                        return sum + payment.amount;
-                    }
-                    return sum;
+                    return sum + payment.amount;
                 }, 0);
                 
                 totalSalaryGenerated += contractSalary;
@@ -55,13 +55,11 @@ class Salary {
             this.renderSalaryDetails(salaryByContract);
             
             // Actualizar dashboard
-            document.getElementById('total-salary-due').textContent = 
-                `$${(totalSalaryGenerated - totalSalaryPaid).toLocaleString('es-ES', { minimumFractionDigits: 2 })}`;
-            document.getElementById('total-salary-paid').textContent = 
-                `$${totalSalaryPaid.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`;
+            this.updateDashboard(totalSalaryGenerated, totalSalaryPaid);
             
         } catch (error) {
             console.error('Error al calcular salarios:', error);
+            this.showMessage('Error al calcular salarios', 'error');
         }
     }
 
@@ -76,13 +74,42 @@ class Salary {
 
     renderSalaryDetails(salaryData) {
         const tbody = document.getElementById('salary-list');
+        if (!tbody) return;
+        
         tbody.innerHTML = '';
         
-        salaryData.forEach(item => {
+        if (salaryData.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${item.contract.code} - ${item.contract.client}</td>
-                <td>$${item.generated.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
+                <td colspan="5" style="text-align: center; padding: 20px;">
+                    No hay datos de salarios disponibles.
+                </td>
+            `;
+            tbody.appendChild(row);
+            return;
+        }
+        
+        // Filtrar contratos con salario pendiente o generado
+        const filteredData = salaryData.filter(item => item.generated > 0 || item.paid > 0);
+        
+        if (filteredData.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="5" style="text-align: center; padding: 20px;">
+                    No hay salarios generados o pagados.
+                </td>
+            `;
+            tbody.appendChild(row);
+            return;
+        }
+        
+        filteredData.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.contract.code}<br><small>${item.contract.client}</small></td>
+                <td>$${item.generated.toLocaleString('es-ES', { minimumFractionDigits: 2 })}<br>
+                    <small>(${item.contract.salaryPercentage}%)</small>
+                </td>
                 <td>$${item.paid.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                 <td>$${item.pending.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</td>
                 <td>
@@ -96,148 +123,80 @@ class Salary {
         });
     }
 
-    async paySalary(contractId) {
+    updateDashboard(generated, paid) {
+        const pending = generated - paid;
+        
+        // Actualizar estadísticas del dashboard
+        const salaryToPay = document.getElementById('salary-to-pay');
+        const salaryPaid = document.getElementById('salary-paid');
+        
+        if (salaryToPay) {
+            salaryToPay.textContent = `$${pending.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`;
+        }
+        
+        if (salaryPaid) {
+            salaryPaid.textContent = `$${paid.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`;
+        }
+        
+        // Actualizar contador de certificaciones pendientes
+        this.updatePendingCertifications();
+    }
+
+    async updatePendingCertifications() {
+        if (!companies?.currentCompany) return;
+        
         try {
-            const contract = await db.get('contracts', contractId);
-            const certifications = await db.getAll('certifications', 'contractId', contractId);
-            const payments = await db.getAll('payments', 'companyId', contracts.currentCompany.id);
+            const certifications = await db.getAll('certifications', 'companyId', companies.currentCompany.id);
+            const pendingCerts = certifications.filter(c => c.status === 'pendiente');
             
-            // Encontrar certificaciones con salario pendiente
-            const pendingCerts = certifications.filter(cert => {
-                const certPayments = payments.filter(p => p.certificationId === cert.id && p.type === 'salary');
-                const paidAmount = certPayments.reduce((sum, p) => sum + p.amount, 0);
-                const salaryDue = cert.amount * (contract.salaryPercentage / 100);
-                return salaryDue > paidAmount;
-            }).sort((a, b) => {
-                // Ordenar cronológicamente
-                const dateA = new Date(a.year, a.month - 1);
-                const dateB = new Date(b.year, b.month - 1);
-                return dateA - dateB;
-            });
-            
-            if (pendingCerts.length === 0) {
-                auth.showMessage('No hay salario pendiente para este contrato', 'info');
-                return;
+            const pendingCertsElement = document.getElementById('pending-certs');
+            if (pendingCertsElement) {
+                pendingCertsElement.textContent = pendingCerts.length;
             }
-            
-            const firstPending = pendingCerts[0];
-            const salaryDue = firstPending.amount * (contract.salaryPercentage / 100);
-            const certPayments = payments.filter(p => p.certificationId === firstPending.id && p.type === 'salary');
-            const paidAmount = certPayments.reduce((sum, p) => sum + p.amount, 0);
-            const remainingDue = salaryDue - paidAmount;
-            
-            // Mostrar formulario de pago
-            const form = `
-                <div class="form-group">
-                    <label>Contrato:</label>
-                    <p><strong>${contract.code} - ${contract.client}</strong></p>
-                </div>
-                <div class="form-group">
-                    <label>Certificación:</label>
-                    <p>${firstPending.month}/${firstPending.year} - $${firstPending.amount.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
-                </div>
-                <div class="form-group">
-                    <label>Salario Generado:</label>
-                    <p>$${salaryDue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
-                </div>
-                <div class="form-group">
-                    <label>Salario Ya Pagado:</label>
-                    <p>$${paidAmount.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
-                </div>
-                <div class="form-group">
-                    <label>Salario Pendiente:</label>
-                    <p>$${remainingDue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
-                </div>
-                <div class="form-group">
-                    <label for="salary-amount">Monto a Pagar ($):</label>
-                    <input type="number" id="salary-amount" step="0.01" max="${remainingDue}" value="${remainingDue}" required>
-                </div>
-                <div class="form-group">
-                    <label for="payment-method">Método de Pago:</label>
-                    <select id="payment-method">
-                        <option value="transferencia">Transferencia</option>
-                        <option value="efectivo">Efectivo</option>
-                        <option value="cheque">Cheque</option>
-                        <option value="tarjeta">Tarjeta</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="payment-date">Fecha:</label>
-                    <input type="date" id="payment-date" value="${new Date().toISOString().split('T')[0]}">
-                </div>
-                <div class="form-group">
-                    <label for="payment-notes">Notas:</label>
-                    <textarea id="payment-notes" rows="3"></textarea>
-                </div>
-            `;
-            
-            modal.show({
-                title: 'Pagar Salario',
-                body: form,
-                onSave: () => this.processSalaryPayment(contract, firstPending, remainingDue)
-            });
-            
         } catch (error) {
-            console.error('Error al procesar pago de salario:', error);
-            auth.showMessage('Error al procesar el pago', 'error');
+            console.error('Error al contar certificaciones pendientes:', error);
         }
     }
 
-    async processSalaryPayment(contract, certification, remainingDue) {
-        const amount = parseFloat(document.getElementById('salary-amount').value);
-        
-        if (isNaN(amount) || amount <= 0 || amount > remainingDue) {
-            auth.showMessage('Monto inválido', 'error');
-            return;
+    async paySalary(contractId) {
+        // Redirigir al módulo de pagos con el contrato pre-seleccionado
+        if (window.app) {
+            app.showSection('payments');
+            
+            // Esperar a que se cargue la sección de pagos
+            setTimeout(() => {
+                if (window.payments) {
+                    payments.showPaymentForm();
+                    
+                    // Pre-seleccionar el contrato en el formulario
+                    setTimeout(() => {
+                        const autoContractSelect = document.getElementById('auto-contract');
+                        if (autoContractSelect) {
+                            autoContractSelect.value = contractId;
+                            
+                            // Disparar evento para actualizar información
+                            const event = new Event('change');
+                            autoContractSelect.dispatchEvent(event);
+                        }
+                    }, 100);
+                }
+            }, 300);
         }
-        
-        try {
-            const payment = {
-                certificationId: certification.id,
-                contractId: contract.id,
-                type: 'salary',
-                amount: amount,
-                method: document.getElementById('payment-method').value,
-                date: document.getElementById('payment-date').value || new Date().toISOString().split('T')[0],
-                notes: document.getElementById('payment-notes').value,
-                companyId: contracts.currentCompany.id,
-                userId: auth.currentUser.id,
-                createdAt: new Date().toISOString()
-            };
-            
-            await db.add('payments', payment);
-            
-            // Actualizar estado de certificación si se pagó completamente
-            const payments = await db.getAll('payments', 'certificationId', certification.id);
-            const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-            const salaryDue = certification.amount * (contract.salaryPercentage / 100);
-            
-            if (Math.abs(totalPaid - salaryDue) < 0.01) {
-                await db.update('certifications', certification.id, {
-                    ...certification,
-                    status: 'pagado'
-                });
-            }
-            
-            modal.hide();
-            auth.showMessage('Pago registrado exitosamente', 'success');
-            
-            // Disparar evento para actualizar otras partes de la app
-            document.dispatchEvent(new CustomEvent('paymentAdded'));
-            
-            // Registrar actividad
-            await db.addActivity({
-                userId: auth.currentUser.id,
-                companyId: contracts.currentCompany.id,
-                type: 'salary_payment',
-                description: `Pago de salario por $${amount.toLocaleString('es-ES', { minimumFractionDigits: 2 })}`
-            });
-            
-        } catch (error) {
-            console.error('Error al registrar pago:', error);
-            auth.showMessage('Error al registrar el pago', 'error');
+    }
+
+    showMessage(message, type) {
+        if (window.auth && auth.showMessage) {
+            auth.showMessage(message, type);
+        } else {
+            alert(message);
         }
     }
 }
 
-const salary = new Salary();
+// Inicializar después de que la base de datos esté lista
+let salary;
+document.addEventListener('DOMContentLoaded', async () => {
+    await db.ready();
+    salary = new Salary();
+    window.salary = salary;
+});
