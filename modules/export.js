@@ -9,17 +9,17 @@ class ExportManager {
     }
 
     async exportToExcel() {
-        if (!contracts.currentCompany || !auth.currentUser) {
+        if (!companies?.currentCompany || !auth.currentUser) {
             auth.showMessage('Primero selecciona una empresa', 'error');
             return;
         }
 
         try {
             // Obtener todos los datos de la empresa actual
-            const contractsList = await db.getAll('contracts', 'companyId', contracts.currentCompany.id);
-            const certifications = await db.getAll('certifications', 'companyId', contracts.currentCompany.id);
-            const invoices = await db.getAll('invoices', 'companyId', contracts.currentCompany.id);
-            const payments = await db.getAll('payments', 'companyId', contracts.currentCompany.id);
+            const contractsList = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
+            const certifications = await db.getAll('certifications', 'companyId', companies.currentCompany.id);
+            const invoices = await db.getAll('invoices', 'companyId', companies.currentCompany.id);
+            const payments = await db.getAll('payments', 'companyId', companies.currentCompany.id);
             
             // Crear workbook
             const wb = XLSX.utils.book_new();
@@ -30,7 +30,7 @@ class ExportManager {
                 'Cliente': c.client,
                 'Valor Servicio': c.serviceValue,
                 'Valor Contrato (+15%)': c.serviceValue * 1.15,
-                '% Salario': c.salaryPercentage,
+                '% Salario': c.salaryPercentage || 0,
                 'Fecha Inicio': c.startDate,
                 'Fecha Fin': c.endDate,
                 'Estado': c.status
@@ -41,13 +41,13 @@ class ExportManager {
             // Hoja de certificaciones
             const certsData = certifications.map(c => {
                 const contract = contractsList.find(con => con.id === c.contractId);
-                const salaryGenerated = c.amount * (c.salaryPercentage / 100);
+                const salaryGenerated = c.amount * ((contract?.salaryPercentage || 0) / 100);
                 return {
                     'Contrato': contract?.code || 'N/A',
                     'Mes/Año': `${c.month}/${c.year}`,
                     'Monto Certificado': c.amount,
                     'Salario Generado': salaryGenerated,
-                    '% Salario': c.salaryPercentage,
+                    '% Salario': contract?.salaryPercentage || 0,
                     'Estado': c.status
                 };
             });
@@ -72,7 +72,7 @@ class ExportManager {
             XLSX.utils.book_append_sheet(wb, wsPayments, 'Pagos');
             
             // Generar archivo
-            const fileName = `${contracts.currentCompany.name}_${new Date().toISOString().split('T')[0]}.xlsx`;
+            const fileName = `${companies.currentCompany.name}_${new Date().toISOString().split('T')[0]}.xlsx`;
             XLSX.writeFile(wb, fileName);
             
             auth.showMessage('Exportación completada', 'success');
@@ -84,7 +84,7 @@ class ExportManager {
     }
 
     async exportToPDF() {
-        if (!contracts.currentCompany || !auth.currentUser) {
+        if (!companies?.currentCompany || !auth.currentUser) {
             auth.showMessage('Primero selecciona una empresa', 'error');
             return;
         }
@@ -95,14 +95,14 @@ class ExportManager {
             
             // Título
             doc.setFontSize(20);
-            doc.text(`Reporte - ${contracts.currentCompany.name}`, 20, 20);
+            doc.text(`Reporte - ${companies.currentCompany.name}`, 20, 20);
             doc.setFontSize(12);
             doc.text(`Generado el: ${new Date().toLocaleDateString('es-ES')}`, 20, 30);
             
             // Obtener datos
-            const contractsList = await db.getAll('contracts', 'companyId', contracts.currentCompany.id);
-            const certifications = await db.getAll('certifications', 'companyId', contracts.currentCompany.id);
-            const payments = await db.getAll('payments', 'companyId', contracts.currentCompany.id);
+            const contractsList = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
+            const certifications = await db.getAll('certifications', 'companyId', companies.currentCompany.id);
+            const payments = await db.getAll('payments', 'companyId', companies.currentCompany.id);
             
             // Resumen
             let yPos = 50;
@@ -163,7 +163,7 @@ class ExportManager {
                     const certHeaders = [['Contrato', 'Mes/Año', 'Monto', 'Salario Generado']];
                     const certData = pendingCerts.map(c => {
                         const contract = contractsList.find(con => con.id === c.contractId);
-                        const salaryGenerated = c.amount * (c.salaryPercentage / 100);
+                        const salaryGenerated = c.amount * ((contract?.salaryPercentage || 0) / 100);
                         return [
                             contract?.code || 'N/A',
                             `${c.month}/${c.year}`,
@@ -186,7 +186,7 @@ class ExportManager {
             }
             
             // Guardar PDF
-            const fileName = `${contracts.currentCompany.name}_reporte_${new Date().toISOString().split('T')[0]}.pdf`;
+            const fileName = `${companies.currentCompany.name}_reporte_${new Date().toISOString().split('T')[0]}.pdf`;
             doc.save(fileName);
             
             auth.showMessage('PDF generado exitosamente', 'success');
