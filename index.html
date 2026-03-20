@@ -205,7 +205,7 @@
                                 <th>Código</th>
                                 <th>Cliente</th>
                                 <th>Valor Servicio</th>
-                                <th>Valor Contrato (+15%)</th>
+                                <th>Valor total (+% de impuestos)</th>
                                 <th>% Salario</th>
                                 <th>Estado</th>
                                 <th>Acciones</th>
@@ -237,6 +237,7 @@
                                 <th>Contrato</th>
                                 <th>Mes/Año</th>
                                 <th>Monto Certificado</th>
+                                <th>Monto certificado +% Impuestos</th>
                                 <th>Salario Generado</th>
                                 <th>Estado</th>
                                 <th>Acciones</th>
@@ -244,7 +245,7 @@
                         </thead>
                         <tbody id="certifications-list">
                             <tr>
-                                <td colspan="6" style="text-align: center; padding: 20px;">
+                                <td colspan="7" style="text-align: center; padding: 20px;">
                                     No hay certificaciones registradas. Haz clic en "Nueva Certificación" para agregar una.
                                 </td>
                             </tr>
@@ -300,12 +301,12 @@
                     </div>
                 </div>
                 <div class="salary-details">
-                    <h3>Detalle por Contrato</h3>
+                    <h3>Detalle por Certificación</h3>
                     <div class="table-container">
                         <table id="salary-table">
                             <thead>
                                 <tr>
-                                    <th>Contrato</th>
+                                    <th>Contrato / Certificación</th>
                                     <th>Salario Generado</th>
                                     <th>Salario Pagado</th>
                                     <th>Salario Pendiente</th>
@@ -327,7 +328,7 @@
             <!-- Pagos -->
             <section id="payments-section" class="content-section">
                 <div class="section-header">
-                    <h2>Pagos de Salario</h2>
+                    <h2>Pagos</h2>
                     <button id="add-payment" class="btn btn-primary">
                         <i class="fas fa-plus"></i> Nuevo Pago
                     </button>
@@ -338,7 +339,7 @@
                             <tr>
                                 <th>Fecha</th>
                                 <th>Contrato</th>
-                                <th>Certificación</th>
+                                <th>Aplicación</th>
                                 <th>Monto</th>
                                 <th>Método</th>
                                 <th>Acciones</th>
@@ -405,6 +406,7 @@
     <script src="modules/companies.js"></script>
     <script src="modules/contracts.js"></script>
     <script src="modules/certifications.js"></script>
+    <script src="modules/invoices.js"></script>
     <script src="modules/salary.js"></script>
     <script src="modules/payments.js"></script>
     <script src="modules/backup.js"></script>
