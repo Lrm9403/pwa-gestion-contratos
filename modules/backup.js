@@ -112,43 +112,78 @@ class BackupManager {
     async importData(data) {
         // Limpiar datos existentes del usuario
         await this.clearUserData(auth.currentUser.id);
+
+        const companyIdMap = new Map();
+        const contractIdMap = new Map();
+        const certificationIdMap = new Map();
         
         // Importar empresas
         if (data.companies && Array.isArray(data.companies)) {
             for (const company of data.companies) {
-                const { contracts, ...companyData } = company;
-                companyData.userId = auth.currentUser.id;
+                const originalCompanyId = company.id;
+                const companyData = {
+                    ...company,
+                    userId: auth.currentUser.id
+                };
+                delete companyData.id;
                 const companyId = await db.add('companies', companyData);
-                
-                // Importar contratos
-                if (contracts && Array.isArray(contracts)) {
-                    for (const contract of contracts) {
-                        const { certifications, invoices, ...contractData } = contract;
-                        contractData.companyId = companyId;
-                        contractData.userId = auth.currentUser.id;
-                        const contractId = await db.add('contracts', contractData);
-                        
-                        // Importar certificaciones
-                        if (certifications && Array.isArray(certifications)) {
-                            for (const cert of certifications) {
-                                cert.contractId = contractId;
-                                cert.companyId = companyId;
-                                cert.userId = auth.currentUser.id;
-                                await db.add('certifications', cert);
-                            }
-                        }
-                        
-                        // Importar facturas
-                        if (invoices && Array.isArray(invoices)) {
-                            for (const invoice of invoices) {
-                                invoice.contractId = contractId;
-                                invoice.companyId = companyId;
-                                invoice.userId = auth.currentUser.id;
-                                await db.add('invoices', invoice);
-                            }
-                        }
-                    }
-                }
+                companyIdMap.set(originalCompanyId, companyId);
+            }
+        }
+
+        if (data.contracts && Array.isArray(data.contracts)) {
+            for (const contract of data.contracts) {
+                const originalContractId = contract.id;
+                const contractData = {
+                    ...contract,
+                    companyId: companyIdMap.get(contract.companyId) || contract.companyId,
+                    userId: auth.currentUser.id
+                };
+                delete contractData.id;
+                const contractId = await db.add('contracts', contractData);
+                contractIdMap.set(originalContractId, contractId);
+            }
+        }
+
+        if (data.certifications && Array.isArray(data.certifications)) {
+            for (const cert of data.certifications) {
+                const originalCertificationId = cert.id;
+                const certData = {
+                    ...cert,
+                    contractId: contractIdMap.get(cert.contractId) || cert.contractId,
+                    companyId: companyIdMap.get(cert.companyId) || cert.companyId,
+                    userId: auth.currentUser.id
+                };
+                delete certData.id;
+                const certificationId = await db.add('certifications', certData);
+                certificationIdMap.set(originalCertificationId, certificationId);
+            }
+        }
+
+        if (data.invoices && Array.isArray(data.invoices)) {
+            for (const invoice of data.invoices) {
+                const invoiceData = {
+                    ...invoice,
+                    contractId: contractIdMap.get(invoice.contractId) || invoice.contractId,
+                    companyId: companyIdMap.get(invoice.companyId) || invoice.companyId,
+                    userId: auth.currentUser.id
+                };
+                delete invoiceData.id;
+                await db.add('invoices', invoiceData);
+            }
+        }
+
+        if (data.payments && Array.isArray(data.payments)) {
+            for (const payment of data.payments) {
+                const paymentData = {
+                    ...payment,
+                    contractId: contractIdMap.get(payment.contractId) || payment.contractId,
+                    companyId: companyIdMap.get(payment.companyId) || payment.companyId,
+                    certificationId: payment.certificationId ? (certificationIdMap.get(payment.certificationId) || payment.certificationId) : null,
+                    userId: auth.currentUser.id
+                };
+                delete paymentData.id;
+                await db.add('payments', paymentData);
             }
         }
     }
