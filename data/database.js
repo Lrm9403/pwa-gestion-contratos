@@ -1,7 +1,7 @@
 class Database {
     constructor() {
         this.dbName = 'ContractManagerDB';
-        this.version = 1; // Versión simplificada
+        this.version = 2; // Incrementada para crear el store de facturas
         this.db = null;
         this.initPromise = this.init();
     }
@@ -36,6 +36,7 @@ class Database {
                     { name: 'companies', keyPath: 'id', indexes: ['userId'] },
                     { name: 'contracts', keyPath: 'id', indexes: ['companyId', 'userId'] },
                     { name: 'certifications', keyPath: 'id', indexes: ['contractId', 'companyId', 'userId'] },
+                    { name: 'invoices', keyPath: 'id', indexes: ['contractId', 'companyId', 'userId'] },
                     { name: 'payments', keyPath: 'id', indexes: ['contractId', 'companyId', 'userId', 'certificationId'] },
                     { name: 'activities', keyPath: 'id', indexes: ['companyId', 'userId'] }
                 ];
@@ -158,6 +159,19 @@ class Database {
 
     async getPaymentsByCompany(companyId) {
         return await this.getAll('payments', 'companyId', companyId);
+    }
+
+    async getUserData(userId) {
+        const [companies, contracts, certifications, invoices, payments, activities] = await Promise.all([
+            this.getAll('companies', 'userId', userId),
+            this.getAll('contracts', 'userId', userId),
+            this.getAll('certifications', 'userId', userId),
+            this.getAll('invoices', 'userId', userId),
+            this.getAll('payments', 'userId', userId),
+            this.getAll('activities', 'userId', userId)
+        ]);
+
+        return { companies, contracts, certifications, invoices, payments, activities };
     }
 
     async addActivity(activity) {
