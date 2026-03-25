@@ -15,10 +15,9 @@ window.contractAppUtils = {
 
     parsePercentageInput(rawValue) {
         const raw = String(rawValue ?? '').trim().replace(',', '.');
-        const normalized = this.normalizeDecimal(raw, 4);
         return {
             raw: raw === '' ? '0' : raw,
-            value: normalized
+            value: this.toNumber(raw)
         };
     },
 
@@ -34,7 +33,11 @@ window.contractAppUtils = {
     },
 
     getCompanyTaxPercentage(company) {
-        return this.normalizeDecimal(company?.taxPercentage ?? 0, 4);
+        if (!company) return 0;
+        if (company.taxPercentageRaw !== undefined && company.taxPercentageRaw !== null && String(company.taxPercentageRaw).trim() !== '') {
+            return this.toNumber(String(company.taxPercentageRaw).replace(',', '.'));
+        }
+        return this.toNumber(company.taxPercentage ?? 0);
     },
 
     calculateTaxAmount(baseAmount, taxPercentage) {
@@ -118,129 +121,269 @@ class ContractManagerApp {
         const sections = document.querySelectorAll('.content-section');
         sections.forEach(section => section.classList.remove('active'));
 
-        const targetSection = document.getElementById(`${sectionId}-section`);
-        if (targetSection) {
-            targetSection.classList.add('active');
+        const section = document.getElementById(`${sectionId}-section`);
+        if (section) {
+            section.classList.add('active');
         }
 
-        setTimeout(() => {
-            if (sectionId === 'contracts' && window.contracts) {
+        if (!window.auth?.currentUser || sectionId === 'companies') return;
+
+        switch (sectionId) {
+            case 'dashboard':
+                dashboard.loadDashboardData();
+                break;
+            case 'contracts':
                 contracts.loadContracts();
-            } else if (sectionId === 'certifications' && window.certifications) {
+                break;
+            case 'certifications':
                 certifications.loadCertifications();
-            } else if (sectionId === 'invoices' && window.invoices) {
+                break;
+            case 'invoices':
                 invoices.loadInvoices();
-            } else if (sectionId === 'payments' && window.payments) {
-                payments.loadPayments();
-            } else if (sectionId === 'salary' && window.salary) {
+                break;
+            case 'salary':
                 salary.updateSalarySummary();
-            } else if (sectionId === 'companies' && window.companies) {
-                companies.loadCompanies();
-            }
-        }, 100);
+                break;
+            case 'payments':
+                payments.loadPayments();
+                break;
+            case 'tools':
+                exportManager?.init?.();
+                break;
+        }
     }
 
     setupModal() {
-        const modal = document.getElementById('modal');
-        const modalTitle = document.getElementById('modal-title');
-        const modalBody = document.getElementById('modal-body');
-        const modalClose = document.getElementById('modal-close');
-        const modalCancel = document.getElementById('modal-cancel');
-        const modalSave = document.getElementById('modal-save');
+        const modalElement = document.getElementById('modal');
+        const closeButton = document.querySelector('.close');
+        const cancelButton = document.getElementById('modal-cancel');
+        const saveButton = document.getElementById('modal-save');
 
-        let currentOnSave = null;
+        closeButton?.addEventListener('click', () => modal.hide());
+        cancelButton?.addEventListener('click', () => modal.hide());
+        saveButton?.addEventListener('click', () => modal.save());
 
-        window.modal = {
-            show: ({ title, body, onSave }) => {
-                modalTitle.textContent = title;
-                modalBody.innerHTML = body;
-                currentOnSave = onSave;
-                modal.classList.add('active');
-            },
-            hide: () => {
-                modal.classList.remove('active');
-                modalBody.innerHTML = '';
-                currentOnSave = null;
-            }
-        };
-
-        modalClose?.addEventListener('click', () => window.modal.hide());
-        modalCancel?.addEventListener('click', () => window.modal.hide());
-        modalSave?.addEventListener('click', () => currentOnSave?.());
-
-        modal?.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                window.modal.hide();
+        window.addEventListener('click', (event) => {
+            if (event.target === modalElement) {
+                modal.hide();
             }
         });
     }
 
     setupConnectionManager() {
-        const updateConnectionStatus = () => {
-            const isOnline = navigator.onLine;
-            const connectionIcon = document.getElementById('connection-icon');
-            const connectionStatus = document.getElementById('connection-status');
+        window.addEventListener('online', () => this.updateConnectionStatus(true));
+        window.addEventListener('offline', () => this.updateConnectionStatus(false));
 
-            if (connectionIcon && connectionStatus) {
-                if (isOnline) {
-                    connectionIcon.className = 'fas fa-wifi';
-                    connectionStatus.textContent = 'En línea';
-                    connectionStatus.style.color = 'var(--success-color)';
-                } else {
-                    connectionIcon.className = 'fas fa-wifi-slash';
-                    connectionStatus.textContent = 'Sin conexión';
-                    connectionStatus.style.color = 'var(--danger-color)';
-                }
-            }
-        };
+        this.updateConnectionStatus(navigator.onLine);
+    }
 
-        updateConnectionStatus();
-        window.addEventListener('online', updateConnectionStatus);
-        window.addEventListener('offline', updateConnectionStatus);
+    updateConnectionStatus(isOnline) {
+        const statusElement = document.getElementById('connection-status');
+        const iconElement = document.getElementById('connection-icon');
+
+        if (!statusElement || !iconElement) return;
+
+        if (isOnline) {
+            statusElement.textContent = 'En línea';
+            iconElement.className = 'fas fa-wifi';
+            iconElement.style.color = '#4CAF50';
+        } else {
+            statusElement.textContent = 'Sin conexión';
+            iconElement.className = 'fas fa-wifi-slash';
+            iconElement.style.color = '#f44336';
+        }
     }
 
     setupForms() {
-        const loginForm = document.getElementById('login-form');
-        const registerForm = document.getElementById('register-form');
+        document.getElementById('search-contracts')?.addEventListener('input', (e) => {
+            contracts.filterContracts(e.target.value);
+        });
 
-        if (loginForm) {
-            loginForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                if (window.auth) auth.login();
-            });
-        }
-
-        if (registerForm) {
-            registerForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                if (window.auth) auth.register();
-            });
-        }
+        document.getElementById('filter-status')?.addEventListener('change', (e) => {
+            certifications.filterByStatus(e.target.value);
+        });
     }
 
-    showMessage(message, type) {
-        if (window.auth && auth.showMessage) {
-            auth.showMessage(message, type);
-        } else {
+    showMessage(message, type = 'info') {
+        const messageContainer = document.getElementById('message-container');
+        if (!messageContainer) {
             alert(message);
+            return;
+        }
+
+        const messageElement = document.createElement('div');
+        messageElement.className = `message message-${type}`;
+        messageElement.innerHTML = `
+            <span>${message}</span>
+            <button onclick="this.parentElement.remove()">&times;</button>
+        `;
+
+        messageContainer.appendChild(messageElement);
+
+        setTimeout(() => {
+            if (messageElement.parentElement) {
+                messageElement.remove();
+            }
+        }, 5000);
+    }
+}
+
+// Modal Manager
+class ModalManager {
+    constructor() {
+        this.currentSaveCallback = null;
+    }
+
+    show(options = {}) {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+
+        if (!modal || !title || !body) return;
+
+        title.textContent = options.title || 'Modal';
+        body.innerHTML = options.body || '';
+        this.currentSaveCallback = options.onSave || null;
+
+        modal.style.display = 'block';
+    }
+
+    hide() {
+        const modal = document.getElementById('modal');
+        if (modal) modal.style.display = 'none';
+        this.currentSaveCallback = null;
+    }
+
+    async save() {
+        if (this.currentSaveCallback) {
+            try {
+                await this.currentSaveCallback();
+            } catch (error) {
+                console.error('Error al guardar:', error);
+            }
         }
     }
 }
 
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-            .then(registration => {
-                console.log('ServiceWorker registrado:', registration.scope);
-            })
-            .catch(error => {
-                console.log('ServiceWorker no registrado:', error);
-            });
-    });
+// Dashboard Manager
+class DashboardManager {
+    constructor() {
+        this.init();
+    }
+
+    init() {
+        document.addEventListener('companyChanged', () => this.loadDashboardData());
+    }
+
+    async loadDashboardData() {
+        if (!window.auth?.currentUser || !window.companies?.currentCompany) {
+            this.clearDashboard();
+            return;
+        }
+
+        try {
+            const companyId = companies.currentCompany.id;
+            const [contractsData, certificationsData, paymentsData, activitiesData] = await Promise.all([
+                db.getAll('contracts', 'companyId', companyId),
+                db.getAll('certifications', 'companyId', companyId),
+                db.getAll('payments', 'companyId', companyId),
+                db.getAll('activities', 'companyId', companyId)
+            ]);
+
+            this.updateStats(contractsData, certificationsData, paymentsData);
+            this.renderRecentActivity(activitiesData);
+        } catch (error) {
+            console.error('Error al cargar dashboard:', error);
+        }
+    }
+
+    updateStats(contracts, certifications, payments) {
+        const activeContracts = contracts.filter(contract => contract.status === 'activo').length;
+        const pendingCerts = certifications.filter(cert => cert.status === 'pendiente').length;
+
+        let salaryToPay = 0;
+        let salaryPaid = 0;
+
+        certifications.forEach(cert => {
+            const contract = contracts.find(c => c.id === cert.contractId);
+            if (contract) {
+                const generated = window.contractAppUtils.calculateSalaryAmount(cert.amount, contract.salaryPercentage || 0);
+                const certPaid = payments
+                    .filter(payment => payment.purpose === 'salary')
+                    .flatMap(payment => payment.allocations || [])
+                    .filter(allocation => allocation.certificationId === cert.id)
+                    .reduce((sum, allocation) => sum + window.contractAppUtils.toNumber(allocation.amount), 0);
+
+                salaryToPay += Math.max(0, generated - certPaid);
+                salaryPaid += certPaid;
+            }
+        });
+
+        document.getElementById('active-contracts').textContent = activeContracts;
+        document.getElementById('pending-certs').textContent = pendingCerts;
+        document.getElementById('salary-to-pay').textContent = window.contractAppUtils.formatCurrency(salaryToPay);
+        document.getElementById('salary-paid').textContent = window.contractAppUtils.formatCurrency(salaryPaid);
+    }
+
+    renderRecentActivity(activities) {
+        const activityList = document.getElementById('activity-list');
+        if (!activityList) return;
+
+        const sortedActivities = activities
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+            .slice(0, 10);
+
+        if (sortedActivities.length === 0) {
+            activityList.innerHTML = '<p style="text-align: center; color: #666;">No hay actividad reciente</p>';
+            return;
+        }
+
+        activityList.innerHTML = sortedActivities.map(activity => `
+            <div class="activity-item">
+                <div class="activity-icon">
+                    <i class="fas ${this.getActivityIcon(activity.type)}"></i>
+                </div>
+                <div class="activity-content">
+                    <p>${activity.description}</p>
+                    <small>${new Date(activity.createdAt).toLocaleString('es-ES')}</small>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    getActivityIcon(type) {
+        const icons = {
+            company_create: 'fa-building',
+            company_update: 'fa-edit',
+            contract_create: 'fa-file-contract',
+            contract_update: 'fa-edit',
+            certification_create: 'fa-certificate',
+            payment_create: 'fa-money-bill-wave',
+            invoice_create: 'fa-receipt'
+        };
+        return icons[type] || 'fa-info-circle';
+    }
+
+    clearDashboard() {
+        document.getElementById('active-contracts').textContent = '0';
+        document.getElementById('pending-certs').textContent = '0';
+        document.getElementById('salary-to-pay').textContent = '$0.00';
+        document.getElementById('salary-paid').textContent = '$0.00';
+        document.getElementById('activity-list').innerHTML = '<p style="text-align: center; color: #666;">No hay actividad reciente</p>';
+    }
 }
 
+// Instancias globales
 let app;
-document.addEventListener('DOMContentLoaded', () => {
+let modal;
+let dashboard;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    modal = new ModalManager();
+    dashboard = new DashboardManager();
     app = new ContractManagerApp();
+
+    window.modal = modal;
+    window.dashboard = dashboard;
     window.app = app;
 });
