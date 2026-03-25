@@ -31,9 +31,16 @@ class Contracts {
     }
 
     buildContractSummary(contract) {
-        const serviceValue = this.utils.toNumber(contract.serviceValue);
+        const baseServiceValue = this.utils.toNumber(contract.serviceValue);
+        const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
+        const supplementsValue = this.utils.roundMoney(
+            supplements.reduce((sum, supplement) => sum + this.utils.toNumber(supplement.amount), 0)
+        );
+        const serviceValue = this.utils.roundMoney(baseServiceValue + supplementsValue);
         const taxPercentage = this.getCompanyTaxPercentage();
         return {
+            baseServiceValue,
+            supplementsValue,
             serviceValue,
             taxPercentage,
             totalValue: this.utils.calculateTotalWithTax(serviceValue, taxPercentage),
@@ -82,7 +89,10 @@ class Contracts {
                 <td>${contract.code || 'N/A'}</td>
                 <td>${contract.name || 'Sin nombre'}</td>
                 <td>${contract.client || 'N/A'}</td>
-                <td>${this.utils.formatCurrency(summary.serviceValue)}</td>
+                <td>
+                    ${this.utils.formatCurrency(summary.serviceValue)}<br>
+                    <small>Base: ${this.utils.formatCurrency(summary.baseServiceValue)} · Supl.: ${this.utils.formatCurrency(summary.supplementsValue)}</small>
+                </td>
                 <td>
                     ${this.utils.formatCurrency(summary.totalValue)}<br>
                     <small>Impuestos: ${this.utils.formatPercentage(summary.taxPercentage, companies?.currentCompany?.taxPercentageRaw)}</small>
@@ -91,6 +101,7 @@ class Contracts {
                 <td><span class="status ${contract.status || 'activo'}">${contract.status || 'activo'}</span></td>
                 <td>
                     <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm btn-primary" onclick="contracts.showSupplementForm('${contract.id}')"><i class="fas fa-file-circle-plus"></i></button>
                     <button class="btn btn-sm btn-danger" onclick="contracts.deleteContract('${contract.id}')"><i class="fas fa-trash"></i></button>
                 </td>
             `;
@@ -262,6 +273,82 @@ class Contracts {
             this.showContractForm(contract);
         } else {
             this.showMessage('Contrato no encontrado', 'error');
+        }
+    }
+
+    async showSupplementForm(contractId) {
+        const contract = await db.get('contracts', contractId);
+        if (!contract) {
+            this.showMessage('Contrato no encontrado', 'error');
+            return;
+        }
+
+        const form = `
+            <div class="form-group">
+                <label for="supplement-amount">Monto suplemento ($) *:</label>
+                <input type="number" id="supplement-amount" step="0.01" min="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="supplement-date">Fecha *:</label>
+                <input type="date" id="supplement-date" value="${new Date().toISOString().split('T')[0]}" required>
+            </div>
+            <div class="form-group">
+                <label for="supplement-description">Descripción:</label>
+                <textarea id="supplement-description" rows="3" placeholder="Motivo o detalle del suplemento"></textarea>
+            </div>
+            <div style="background:#f5f5f5;padding:12px;border-radius:6px;">
+                <p><strong>Contrato:</strong> ${contract.code} - ${contract.name || 'Sin nombre'}</p>
+                <p><strong>Valor base:</strong> ${this.utils.formatCurrency(contract.serviceValue)}</p>
+            </div>
+        `;
+
+        modal.show({
+            title: `Nuevo suplemento - ${contract.code}`,
+            body: form,
+            onSave: () => this.saveSupplement(contractId)
+        });
+    }
+
+    async saveSupplement(contractId) {
+        const amount = this.utils.toNumber(document.getElementById('supplement-amount').value);
+        const date = document.getElementById('supplement-date').value;
+        const description = document.getElementById('supplement-description').value.trim();
+
+        if (amount <= 0 || !date) {
+            this.showMessage('Completa correctamente el suplemento', 'error');
+            return;
+        }
+
+        try {
+            const contract = await db.get('contracts', contractId);
+            if (!contract) {
+                this.showMessage('Contrato no encontrado', 'error');
+                return;
+            }
+
+            const supplements = Array.isArray(contract.supplements) ? [...contract.supplements] : [];
+            supplements.push({
+                id: `sup_${Date.now()}`,
+                amount,
+                date,
+                description
+            });
+
+            await db.update('contracts', contractId, {
+                ...contract,
+                supplements,
+                updatedAt: new Date().toISOString()
+            });
+
+            modal.hide();
+            this.showMessage('Suplemento agregado exitosamente', 'success');
+            await this.loadContracts();
+            await certifications?.loadCertifications?.();
+            await invoices?.loadInvoices?.();
+            await salary?.updateSalarySummary?.();
+        } catch (error) {
+            console.error('Error al guardar suplemento:', error);
+            this.showMessage(`Error al guardar el suplemento: ${error.message}`, 'error');
         }
     }
 
