@@ -46,6 +46,18 @@ class Payments {
         return map;
     }
 
+    isInvoiceSettled(invoice, invoicePaidMap) {
+        if ((invoice.manualStatus || invoice.status) === 'pagado') return true;
+        const paid = invoicePaidMap.get(invoice.id) || 0;
+        return paid >= this.utils.toNumber(invoice.amount);
+    }
+
+    canPaySalaryForCertification(certification, invoicesList, invoicePaidMap) {
+        const relatedInvoices = invoicesList.filter(invoice => invoice.certificationId === certification.id);
+        if (relatedInvoices.length === 0) return false;
+        return relatedInvoices.every(invoice => this.isInvoiceSettled(invoice, invoicePaidMap));
+    }
+
     async loadPayments() {
         if (!companies?.currentCompany || !auth?.currentUser) {
             this.renderPayments([]);
@@ -143,12 +155,13 @@ class Payments {
             .filter(certification => {
                 const contract = contractsList.find(item => item.id === certification.contractId);
                 const pending = this.utils.calculateSalaryAmount(certification.amount, contract?.salaryPercentage || 0) - (salaryPaidMap.get(certification.id) || 0);
-                return pending > 0;
+                const eligible = this.canPaySalaryForCertification(certification, invoicesList, invoicePaidMap);
+                return pending > 0 && eligible;
             })
             .sort((a, b) => this.utils.comparePeriods(a, b));
 
         const unpaidInvoices = invoicesList
-            .filter(invoice => this.utils.toNumber(invoice.amount) - (invoicePaidMap.get(invoice.id) || 0) > 0)
+            .filter(invoice => !this.isInvoiceSettled(invoice, invoicePaidMap))
             .sort((a, b) => new Date(a.date) - new Date(b.date));
 
         const form = `
@@ -264,9 +277,13 @@ class Payments {
                     const paid = salaryPaidMap.get(certification.id) || 0;
                     return sum + Math.max(0, total - paid);
                 }, 0);
-                infoSummary.textContent = mode === 'manual'
-                    ? 'El pago se aplicará solo a la certificación seleccionada.'
-                    : `El pago se aplicará automáticamente a certificaciones por orden mensual. Pendiente total: ${this.utils.formatCurrency(totalPending)}.`;
+                if (list.length === 0) {
+                    infoSummary.textContent = 'No hay certificaciones elegibles para pago de salario. Cada certificación debe tener su factura asociada y pagada.';
+                } else {
+                    infoSummary.textContent = mode === 'manual'
+                        ? 'El pago se aplicará solo a la certificación seleccionada.'
+                        : `El pago se aplicará automáticamente a certificaciones por orden mensual. Pendiente total: ${this.utils.formatCurrency(totalPending)}.`;
+                }
             } else {
                 const list = unpaidInvoices.filter(item => !selectedContractId || item.contractId === selectedContractId);
                 const totalPending = list.reduce((sum, invoice) => sum + Math.max(0, this.utils.toNumber(invoice.amount) - (invoicePaidMap.get(invoice.id) || 0)), 0);
@@ -318,12 +335,14 @@ class Payments {
                         const contract = contractsList.find(item => item.id === certification.contractId);
                         const generated = this.utils.calculateSalaryAmount(certification.amount, contract?.salaryPercentage || 0);
                         const paid = salaryPaidMap.get(certification.id) || 0;
+                        const eligible = this.canPaySalaryForCertification(certification, invoicesList, invoicePaidMap);
                         return {
                             certification,
-                            pending: this.utils.roundMoney(Math.max(0, generated - paid))
+                            pending: this.utils.roundMoney(Math.max(0, generated - paid)),
+                            eligible
                         };
                     })
-                    .filter(item => item.pending > 0)
+                    .filter(item => item.pending > 0 && item.eligible)
                     .sort((a, b) => this.utils.comparePeriods(a.certification, b.certification));
 
                 if (mode === 'manual') {
@@ -351,7 +370,7 @@ class Payments {
                         invoice,
                         pending: this.utils.roundMoney(Math.max(0, this.utils.toNumber(invoice.amount) - (invoicePaidMap.get(invoice.id) || 0)))
                     }))
-                    .filter(item => item.pending > 0)
+                    .filter(item => item.pending > 0 && !this.isInvoiceSettled(item.invoice, invoicePaidMap))
                     .sort((a, b) => new Date(a.invoice.date) - new Date(b.invoice.date));
 
                 if (mode === 'manual') {
@@ -375,7 +394,7 @@ class Payments {
             }
 
             if (allocations.length === 0) {
-                this.showMessage('No hay registros pendientes para aplicar este pago', 'warning');
+                this.showMessage(purpose === 'salary' ? 'No hay salarios elegibles: la factura asociada a la certificación debe estar pagada.' : 'No hay registros pendientes para aplicar este pago', 'warning');
                 return;
             }
 
