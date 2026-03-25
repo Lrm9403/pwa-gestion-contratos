@@ -85,7 +85,7 @@ class Companies {
             card.innerHTML = `
                 <h3>${company.name}</h3>
                 <p><strong>RUC/RIF:</strong> ${company.taxId || 'No especificado'}</p>
-                <p><strong>% Impuestos:</strong> ${this.utils.toNumber(company.taxPercentage).toFixed(2)}%</p>
+                <p><strong>% Impuestos:</strong> ${this.utils.formatPercentage(company.taxPercentage, company.taxPercentageRaw)}</p>
                 <p><strong>Dirección:</strong> ${company.address || 'No especificada'}</p>
                 <p><strong>Teléfono:</strong> ${company.phone || 'No especificado'}</p>
                 <p><strong>Email:</strong> ${company.email || 'No especificado'}</p>
@@ -112,7 +112,7 @@ class Companies {
             </div>
             <div class="form-group">
                 <label for="company-tax-percentage">% de impuestos *:</label>
-                <input type="number" id="company-tax-percentage" min="0" max="100" step="0.01" value="${company?.taxPercentage ?? 0}" required>
+                <input type="number" id="company-tax-percentage" min="0" max="100" step="0.01" value="${company?.taxPercentageRaw ?? company?.taxPercentage ?? 0}" required>
                 <small>Este porcentaje se aplicará sobre el valor del servicio para calcular el valor total del contrato y de las certificaciones.</small>
             </div>
             <div class="form-group">
@@ -140,7 +140,8 @@ class Companies {
     async saveCompany(id = null) {
         const name = document.getElementById('company-name').value.trim();
         const taxId = document.getElementById('company-taxId').value.trim();
-        const taxPercentage = this.utils.toNumber(document.getElementById('company-tax-percentage').value);
+        const taxPercentageInput = this.utils.parsePercentageInput(document.getElementById('company-tax-percentage').value);
+        const taxPercentage = taxPercentageInput.value;
         const address = document.getElementById('company-address').value.trim();
         const phone = document.getElementById('company-phone').value.trim();
         const email = document.getElementById('company-email').value.trim();
@@ -159,6 +160,7 @@ class Companies {
             name,
             taxId,
             taxPercentage,
+            taxPercentageRaw: taxPercentageInput.raw,
             address,
             phone,
             email,
@@ -296,7 +298,7 @@ class Companies {
         if (!currentCompanyElement) return;
 
         if (this.currentCompany) {
-            currentCompanyElement.textContent = `${this.currentCompany.name} · Impuesto ${this.utils.toNumber(this.currentCompany.taxPercentage).toFixed(2)}%`;
+            currentCompanyElement.textContent = `${this.currentCompany.name} · Impuesto ${this.utils.formatPercentage(this.currentCompany.taxPercentage, this.currentCompany.taxPercentageRaw)}`;
             currentCompanyElement.style.color = 'var(--primary-color)';
             currentCompanyElement.style.fontWeight = 'bold';
         } else {
