@@ -4,8 +4,29 @@ window.contractAppUtils = {
         return Number.isFinite(number) ? number : 0;
     },
 
+    normalizeDecimal(value, decimals = 4) {
+        const factor = 10 ** decimals;
+        return Math.round((this.toNumber(value) + Number.EPSILON) * factor) / factor;
+    },
+
     roundMoney(value) {
-        return Math.round((this.toNumber(value) + Number.EPSILON) * 100) / 100;
+        return this.normalizeDecimal(value, 2);
+    },
+
+    parsePercentageInput(rawValue) {
+        const raw = String(rawValue ?? '').trim().replace(',', '.');
+        const normalized = this.normalizeDecimal(raw, 4);
+        return {
+            raw: raw === '' ? '0' : raw,
+            value: normalized
+        };
+    },
+
+    formatPercentage(value, raw = null) {
+        if (raw !== null && raw !== undefined && String(raw).trim() !== '') {
+            return `${String(raw).trim()}%`;
+        }
+        return `${this.normalizeDecimal(value, 2).toFixed(2)}%`;
     },
 
     formatCurrency(value) {
@@ -13,7 +34,7 @@ window.contractAppUtils = {
     },
 
     getCompanyTaxPercentage(company) {
-        return this.toNumber(company?.taxPercentage);
+        return this.normalizeDecimal(company?.taxPercentage ?? 0, 4);
     },
 
     calculateTaxAmount(baseAmount, taxPercentage) {
