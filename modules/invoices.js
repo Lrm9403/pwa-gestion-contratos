@@ -19,6 +19,7 @@ class Invoices {
 
     getInvoiceStatus(invoice, paidAmount) {
         const amount = this.utils.toNumber(invoice.amount);
+        if (invoice.manualStatus === 'pagado') return 'pagado';
         if (paidAmount <= 0) return 'por_pagar';
         if (paidAmount >= amount) return 'pagado';
         return 'parcial';
@@ -159,6 +160,13 @@ class Invoices {
                 <input type="number" id="invoice-amount" step="0.01" min="0.01" value="${invoice?.amount || ''}" required>
             </div>
             <div class="form-group">
+                <label for="invoice-manual-status">¿Factura pagada al registrar? *:</label>
+                <select id="invoice-manual-status">
+                    <option value="por_pagar" ${(invoice?.manualStatus || 'por_pagar') === 'por_pagar' ? 'selected' : ''}>No, por pagar</option>
+                    <option value="pagado" ${invoice?.manualStatus === 'pagado' ? 'selected' : ''}>Sí, pagada</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label for="invoice-notes">Notas:</label>
                 <textarea id="invoice-notes" rows="3">${invoice?.notes || ''}</textarea>
             </div>
@@ -189,6 +197,7 @@ class Invoices {
         const date = document.getElementById('invoice-date').value;
         const dueDate = document.getElementById('invoice-due-date').value || '';
         const amount = this.utils.toNumber(document.getElementById('invoice-amount').value);
+        const manualStatus = document.getElementById('invoice-manual-status').value;
         const notes = document.getElementById('invoice-notes').value.trim();
 
         if (!number || !contractId || !date || amount <= 0) {
@@ -203,7 +212,8 @@ class Invoices {
             date,
             dueDate,
             amount,
-            status: 'por_pagar',
+            status: manualStatus,
+            manualStatus,
             notes,
             companyId: companies.currentCompany.id,
             userId: auth.currentUser.id,
