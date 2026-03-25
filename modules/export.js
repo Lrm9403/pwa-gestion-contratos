@@ -31,6 +31,28 @@ class ExportManager {
         return map;
     }
 
+    getContractSummary(contract, companyTax) {
+        const baseServiceValue = this.utils.toNumber(contract.serviceValue);
+        const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
+        const supplementsValue = this.utils.roundMoney(
+            supplements.reduce((sum, supplement) => sum + this.utils.toNumber(supplement.amount), 0)
+        );
+        const serviceValue = this.utils.roundMoney(baseServiceValue + supplementsValue);
+        return {
+            baseServiceValue,
+            supplementsValue,
+            serviceValue,
+            totalWithTax: this.utils.calculateTotalWithTax(serviceValue, companyTax)
+        };
+    }
+
+    getInvoiceStatus(invoice, paidAmount) {
+        if ((invoice.manualStatus || invoice.status) === 'pagado') return 'pagado';
+        if (paidAmount <= 0) return 'por_pagar';
+        if (paidAmount >= this.utils.toNumber(invoice.amount)) return 'pagado';
+        return 'parcial';
+    }
+
     async exportToExcel() {
         if (!companies?.currentCompany || !auth?.currentUser) {
             auth.showMessage('Primero selecciona una empresa', 'error');
@@ -50,18 +72,38 @@ class ExportManager {
             const wb = XLSX.utils.book_new();
             const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
 
-            const contractsData = contractsList.map(contract => ({
+            const contractsData = contractsList.map(contract => {
+                const summary = this.getContractSummary(contract, companyTax);
+                return ({
                 'Código': contract.code,
+                'Nombre': contract.name || '',
                 'Cliente': contract.client,
-                'Valor Servicio': contract.serviceValue,
+                'Valor Base Servicio': summary.baseServiceValue,
+                'Valor Suplementos': summary.supplementsValue,
+                'Valor Servicio': summary.serviceValue,
                 '% Impuestos': companyTax,
-                'Valor Total (+% impuestos)': this.utils.calculateTotalWithTax(contract.serviceValue, companyTax),
+                'Valor Total (+% impuestos)': summary.totalWithTax,
                 '% Salario': contract.salaryPercentage,
                 'Fecha Inicio': contract.startDate,
                 'Fecha Fin': contract.endDate,
                 'Estado': contract.status
-            }));
+            })});
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(contractsData), 'Contratos');
+
+            const supplementsData = contractsList.flatMap(contract => {
+                const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
+                if (supplements.length === 0) return [];
+                return supplements.map(supplement => ({
+                    'Contrato': contract.code,
+                    'Nombre Contrato': contract.name || '',
+                    'Fecha': supplement.date || '',
+                    'Monto': this.utils.toNumber(supplement.amount),
+                    'Descripción': supplement.description || ''
+                }));
+            });
+            if (supplementsData.length > 0) {
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(supplementsData), 'Suplementos');
+            }
 
             const certificationsData = certificationsList.map(certification => {
                 const contract = contractsList.find(item => item.id === certification.contractId);
@@ -92,7 +134,7 @@ class ExportManager {
                     'Monto': invoice.amount,
                     'Pagado': paid,
                     'Pendiente': this.utils.roundMoney(Math.max(0, this.utils.toNumber(invoice.amount) - paid)),
-                    'Estado': paid <= 0 ? 'por_pagar' : paid >= invoice.amount ? 'pagado' : 'parcial'
+                    'Estado': this.getInvoiceStatus(invoice, paid)
                 };
             });
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(invoicesData), 'Facturas');
@@ -114,6 +156,28 @@ class ExportManager {
                 'Notas': payment.notes || ''
             }));
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(paymentsData), 'Pagos');
+
+            const salaryGeneratedTotal = certificationsList.reduce((sum, certification) => {
+                const contract = contractsList.find(item => item.id === certification.contractId);
+                return sum + this.utils.calculateSalaryAmount(certification.amount, contract?.salaryPercentage || 0);
+            }, 0);
+            const salaryPaidTotal = Array.from(salaryPaidMap.values()).reduce((sum, value) => sum + value, 0);
+            const invoicesTotal = invoicesList.reduce((sum, invoice) => sum + this.utils.toNumber(invoice.amount), 0);
+            const invoicesPaidTotal = Array.from(invoicePaidMap.values()).reduce((sum, value) => sum + value, 0);
+            const summaryData = [{
+                'Empresa': companies.currentCompany.name,
+                'Fecha Exportación': new Date().toISOString().split('T')[0],
+                'Contratos': contractsList.length,
+                'Certificaciones': certificationsList.length,
+                'Facturas': invoicesList.length,
+                'Pagos': paymentsList.length,
+                'Salario Generado': this.utils.roundMoney(salaryGeneratedTotal),
+                'Salario Pagado': this.utils.roundMoney(salaryPaidTotal),
+                'Salario Pendiente': this.utils.roundMoney(Math.max(0, salaryGeneratedTotal - salaryPaidTotal)),
+                'Facturación Total': this.utils.roundMoney(invoicesTotal),
+                'Facturación Pagada': this.utils.roundMoney(invoicesPaidTotal)
+            }];
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Resumen');
 
             XLSX.writeFile(wb, `${companies.currentCompany.name}_${new Date().toISOString().split('T')[0]}.xlsx`);
             auth.showMessage('Exportación completada', 'success');
@@ -170,14 +234,16 @@ class ExportManager {
                 body: contractsList.map(contract => [
                     contract.code,
                     contract.client,
-                    this.utils.formatCurrency(contract.serviceValue),
+                    this.utils.formatCurrency(this.getContractSummary(contract, companyTax).serviceValue),
                     `${companyTax.toFixed(2)}%`,
-                    this.utils.formatCurrency(this.utils.calculateTotalWithTax(contract.serviceValue, companyTax)),
+                    this.utils.formatCurrency(this.getContractSummary(contract, companyTax).totalWithTax),
                     `${this.utils.toNumber(contract.salaryPercentage).toFixed(2)}%`
                 ]),
                 theme: 'striped',
                 headStyles: { fillColor: [26, 35, 126] }
             });
+
+            doc.text('Incluye valor base + suplementos por contrato.', 20, doc.lastAutoTable.finalY + 10);
 
             doc.addPage();
             doc.autoTable({
@@ -215,12 +281,31 @@ class ExportManager {
                         this.utils.formatCurrency(invoice.amount),
                         this.utils.formatCurrency(paid),
                         this.utils.formatCurrency(pending),
-                        paid <= 0 ? 'por_pagar' : paid >= invoice.amount ? 'pagado' : 'parcial'
+                        this.getInvoiceStatus(invoice, paid)
                     ];
                 }),
                 theme: 'striped',
                 headStyles: { fillColor: [255, 112, 67] }
             });
+
+            const supplementsRows = contractsList.flatMap(contract =>
+                (Array.isArray(contract.supplements) ? contract.supplements : []).map(supplement => [
+                    contract.code,
+                    supplement.date || '',
+                    this.utils.formatCurrency(supplement.amount),
+                    supplement.description || ''
+                ])
+            );
+            if (supplementsRows.length > 0) {
+                doc.addPage();
+                doc.autoTable({
+                    startY: 20,
+                    head: [['Contrato', 'Fecha', 'Monto', 'Descripción']],
+                    body: supplementsRows,
+                    theme: 'striped',
+                    headStyles: { fillColor: [63, 81, 181] }
+                });
+            }
 
             doc.save(`${companies.currentCompany.name}_reporte_${new Date().toISOString().split('T')[0]}.pdf`);
             auth.showMessage('PDF generado exitosamente', 'success');
