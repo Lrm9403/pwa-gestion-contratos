@@ -67,7 +67,7 @@ class Contracts {
         if (contracts.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 20px;">
+                    <td colspan="8" style="text-align: center; padding: 20px;">
                         No hay contratos registrados. Haz clic en "Nuevo Contrato" para agregar uno.
                     </td>
                 </tr>
@@ -80,13 +80,14 @@ class Contracts {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${contract.code || 'N/A'}</td>
+                <td>${contract.name || 'Sin nombre'}</td>
                 <td>${contract.client || 'N/A'}</td>
                 <td>${this.utils.formatCurrency(summary.serviceValue)}</td>
                 <td>
                     ${this.utils.formatCurrency(summary.totalValue)}<br>
-                    <small>Impuestos: ${summary.taxPercentage.toFixed(2)}% (${this.utils.formatCurrency(summary.taxAmount)})</small>
+                    <small>Impuestos: ${this.utils.formatPercentage(summary.taxPercentage, companies?.currentCompany?.taxPercentageRaw)}</small>
                 </td>
-                <td>${summary.salaryPercentage.toFixed(2)}%</td>
+                <td>${this.utils.formatPercentage(summary.salaryPercentage, contract.salaryPercentageRaw)}</td>
                 <td><span class="status ${contract.status || 'activo'}">${contract.status || 'activo'}</span></td>
                 <td>
                     <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')"><i class="fas fa-edit"></i></button>
@@ -104,12 +105,17 @@ class Contracts {
         }
 
         const taxPercentage = this.getCompanyTaxPercentage();
+        const taxPercentageRaw = this.currentCompany?.taxPercentageRaw;
         const title = contract ? 'Editar Contrato' : 'Nuevo Contrato';
         const form = `
             <div class="form-group">
                 <label for="contract-code">Código *:</label>
                 <input type="text" id="contract-code" value="${contract?.code || ''}" required>
                 <small>Código único para identificar el contrato.</small>
+            </div>
+            <div class="form-group">
+                <label for="contract-name">Nombre del contrato *:</label>
+                <input type="text" id="contract-name" value="${contract?.name || ''}" required>
             </div>
             <div class="form-group">
                 <label for="contract-client">Cliente *:</label>
@@ -121,12 +127,12 @@ class Contracts {
             </div>
             <div class="form-group">
                 <label for="contract-salary-percentage">% de salario *:</label>
-                <input type="number" id="contract-salary-percentage" step="0.01" min="0" max="100" value="${contract?.salaryPercentage || ''}" required>
+                <input type="number" id="contract-salary-percentage" step="0.01" min="0" max="100" value="${contract?.salaryPercentageRaw ?? contract?.salaryPercentage ?? ''}" required>
                 <small>Este porcentaje se calcula sobre el valor del servicio y luego se aplica a cada certificación mensual.</small>
             </div>
             <div class="form-group">
                 <label>% de impuestos de la empresa:</label>
-                <input type="text" value="${taxPercentage.toFixed(2)}%" disabled>
+                <input type="text" value="${this.utils.formatPercentage(taxPercentage, taxPercentageRaw)}" disabled>
                 <small>El porcentaje de impuestos se configura en la empresa seleccionada.</small>
             </div>
             <div class="form-group">
@@ -152,9 +158,9 @@ class Contracts {
             <div id="contract-preview" style="background:#f5f5f5;padding:15px;border-radius:5px;margin-top:15px;display:none;">
                 <h4>Resumen</h4>
                 <p><strong>Valor del servicio:</strong> <span id="contract-preview-service">$0.00</span></p>
-                <p><strong>Impuestos:</strong> <span id="contract-preview-tax">$0.00</span> (<span id="contract-preview-tax-rate">0</span>%)</p>
+                <p><strong>Impuestos:</strong> <span id="contract-preview-tax">$0.00</span> (${this.utils.formatPercentage(taxPercentage, taxPercentageRaw)})</p>
                 <p><strong>Valor total:</strong> <span id="contract-preview-total">$0.00</span></p>
-                <p><strong>% salario:</strong> <span id="contract-preview-salary-rate">0</span>%</p>
+                <p><strong>% salario:</strong> <span id="contract-preview-salary-rate">0%</span></p>
             </div>
         `;
 
@@ -165,13 +171,12 @@ class Contracts {
         const preview = document.getElementById('contract-preview');
         const updatePreview = () => {
             const serviceValue = this.utils.toNumber(serviceInput.value);
-            const salaryPercentage = this.utils.toNumber(salaryInput.value);
+            const salary = this.utils.parsePercentageInput(salaryInput.value);
             preview.style.display = serviceValue > 0 ? 'block' : 'none';
             document.getElementById('contract-preview-service').textContent = this.utils.formatCurrency(serviceValue);
             document.getElementById('contract-preview-tax').textContent = this.utils.formatCurrency(this.utils.calculateTaxAmount(serviceValue, taxPercentage));
-            document.getElementById('contract-preview-tax-rate').textContent = taxPercentage.toFixed(2);
             document.getElementById('contract-preview-total').textContent = this.utils.formatCurrency(this.utils.calculateTotalWithTax(serviceValue, taxPercentage));
-            document.getElementById('contract-preview-salary-rate').textContent = salaryPercentage.toFixed(2);
+            document.getElementById('contract-preview-salary-rate').textContent = this.utils.formatPercentage(salary.value, salary.raw);
         };
 
         serviceInput?.addEventListener('input', updatePreview);
@@ -185,12 +190,16 @@ class Contracts {
             return;
         }
 
+        const salaryInput = this.utils.parsePercentageInput(document.getElementById('contract-salary-percentage').value);
         const contract = {
             code: document.getElementById('contract-code').value.trim(),
+            name: document.getElementById('contract-name').value.trim(),
             client: document.getElementById('contract-client').value.trim(),
             serviceValue: this.utils.toNumber(document.getElementById('contract-service-value').value),
-            salaryPercentage: this.utils.toNumber(document.getElementById('contract-salary-percentage').value),
+            salaryPercentage: salaryInput.value,
+            salaryPercentageRaw: salaryInput.raw,
             taxPercentage: this.getCompanyTaxPercentage(),
+            taxPercentageRaw: this.currentCompany.taxPercentageRaw ?? String(this.currentCompany.taxPercentage ?? ''),
             startDate: document.getElementById('contract-start-date').value,
             endDate: document.getElementById('contract-end-date').value,
             status: document.getElementById('contract-status').value,
@@ -201,8 +210,8 @@ class Contracts {
             updatedAt: new Date().toISOString()
         };
 
-        if (!contract.code || !contract.client) {
-            this.showMessage('El código y el cliente son requeridos', 'error');
+        if (!contract.code || !contract.name || !contract.client) {
+            this.showMessage('El código, nombre y cliente son requeridos', 'error');
             return;
         }
         if (contract.serviceValue <= 0) {
@@ -239,7 +248,7 @@ class Contracts {
                 userId: auth.currentUser.id,
                 companyId: this.currentCompany.id,
                 type: id ? 'contract_update' : 'contract_create',
-                description: `${id ? 'Actualizado' : 'Creado'} contrato ${contract.code}`
+                description: `${id ? 'Actualizado' : 'Creado'} contrato ${contract.code} - ${contract.name}`
             });
         } catch (error) {
             console.error('Error al guardar contrato:', error);
@@ -288,7 +297,7 @@ class Contracts {
     updateCompanyUI() {
         const element = document.getElementById('current-company');
         if (element && this.currentCompany) {
-            element.textContent = `${this.currentCompany.name} · Impuesto ${this.getCompanyTaxPercentage().toFixed(2)}%`;
+            element.textContent = `${this.currentCompany.name} · Impuesto ${this.utils.formatPercentage(this.getCompanyTaxPercentage(), this.currentCompany.taxPercentageRaw)}`;
         }
     }
 
