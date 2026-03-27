@@ -54,6 +54,10 @@ class ExportManager {
     }
 
     async exportToExcel() {
+        if (!window.XLSX) {
+            auth.showMessage('No se pudo cargar la librería XLSX para exportar a Excel', 'error');
+            return;
+        }
         if (!companies?.currentCompany || !auth?.currentUser) {
             auth.showMessage('Primero selecciona una empresa', 'error');
             return;
@@ -188,6 +192,10 @@ class ExportManager {
     }
 
     async exportToPDF() {
+        if (!window.jspdf || !window.jspdf.jsPDF) {
+            auth.showMessage('No se pudo cargar la librería jsPDF para exportar PDF', 'error');
+            return;
+        }
         if (!companies?.currentCompany || !auth?.currentUser) {
             auth.showMessage('Primero selecciona una empresa', 'error');
             return;
@@ -228,6 +236,7 @@ class ExportManager {
             doc.text(`Salario generado: ${this.utils.formatCurrency(totalSalaryGenerated)}`, 20, 71);
             doc.text(`Salario pagado: ${this.utils.formatCurrency(totalSalaryPaid)}`, 20, 78);
 
+            if (typeof doc.autoTable !== 'function') { throw new Error('autoTable no está disponible'); }
             doc.autoTable({
                 startY: 88,
                 head: [['Código', 'Cliente', 'Servicio', '% Imp.', 'Total contrato', '% Salario']],
