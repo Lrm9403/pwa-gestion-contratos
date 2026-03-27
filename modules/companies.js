@@ -2,6 +2,7 @@ class Companies {
     constructor() {
         this.currentCompany = null;
         this.utils = window.contractAppUtils;
+        this.isSavingCompany = false;
         this.init();
     }
 
@@ -99,6 +100,11 @@ class Companies {
         });
     }
 
+
+    normalizeCompanyValue(value) {
+        return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    }
+
     showCompanyForm(company = null) {
         const title = company ? 'Editar Empresa' : 'Nueva Empresa';
         const form = `
@@ -112,7 +118,7 @@ class Companies {
             </div>
             <div class="form-group">
                 <label for="company-tax-percentage">% de impuestos *:</label>
-                <input type="number" id="company-tax-percentage" min="0" max="100" step="0.01" value="${company?.taxPercentageRaw ?? company?.taxPercentage ?? 0}" required>
+                <input type="number" id="company-tax-percentage" min="0" max="100" step="0.0000001" value="${company?.taxPercentageRaw ?? company?.taxPercentage ?? 0}" required>
                 <small>Este porcentaje se aplicará sobre el valor del servicio para calcular el valor total del contrato y de las certificaciones.</small>
             </div>
             <div class="form-group">
@@ -138,6 +144,8 @@ class Companies {
     }
 
     async saveCompany(id = null) {
+        if (this.isSavingCompany) return;
+
         const name = document.getElementById('company-name').value.trim();
         const taxId = document.getElementById('company-taxId').value.trim();
         const taxPercentageInput = this.utils.parsePercentageInput(document.getElementById('company-tax-percentage').value);
@@ -170,6 +178,24 @@ class Companies {
         };
 
         try {
+            this.isSavingCompany = true;
+
+            const companiesList = await db.getCompaniesByUser(auth.currentUser.id);
+            const normalizedName = this.normalizeCompanyValue(name);
+            const normalizedTaxId = this.normalizeCompanyValue(taxId);
+            const duplicateCompany = companiesList.find(item => {
+                if (item.id === id) return false;
+                const itemName = this.normalizeCompanyValue(item.name);
+                const itemTaxId = this.normalizeCompanyValue(item.taxId);
+                const sameName = itemName && itemName === normalizedName;
+                const sameTaxId = normalizedTaxId && itemTaxId && itemTaxId === normalizedTaxId;
+                return sameName || sameTaxId;
+            });
+            if (duplicateCompany) {
+                this.showMessage('Ya existe una empresa con ese nombre o con ese RUC/RIF', 'error');
+                return;
+            }
+
             let companyId = id;
             if (id) {
                 const existingCompany = await db.get('companies', id);
@@ -198,6 +224,8 @@ class Companies {
         } catch (error) {
             console.error('Error al guardar empresa:', error);
             this.showMessage(`Error al guardar la empresa: ${error.message}`, 'error');
+        } finally {
+            this.isSavingCompany = false;
         }
     }
 
