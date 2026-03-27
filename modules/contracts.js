@@ -30,6 +30,10 @@ class Contracts {
         return this.utils.getCompanyTaxPercentage(this.currentCompany || companies?.currentCompany);
     }
 
+    getContractTypeLabel(type) {
+        return type === 'supplement' ? 'Suplemento' : 'Contrato';
+    }
+
     getContractScopeOptions(contract) {
         const options = [{
             id: `contract:${contract.id}`,
@@ -102,7 +106,7 @@ class Contracts {
         if (contracts.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" style="text-align: center; padding: 20px;">
+                    <td colspan="10" style="text-align: center; padding: 20px;">
                         No hay contratos registrados. Haz clic en "Nuevo Contrato" para agregar uno.
                     </td>
                 </tr>
@@ -115,11 +119,13 @@ class Contracts {
             const totalPending = scopes.reduce((sum, scope) => sum + scope.pendingWithTax, 0);
             const status = totalPending <= 0 ? 'finalizado' : ((contract.status === 'suspendido') ? 'suspendido' : 'activo');
             const details = scopes.map(scope => `${scope.label}: Pendiente ${this.utils.formatCurrency(scope.pendingWithTax)}`).join('<br>');
+            const canAddSupplement = (contract.contractType || 'contract') === 'contract';
 
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${contract.code || 'N/A'}</td>
                 <td>${contract.name || 'Sin nombre'}</td>
+                <td>${this.getContractTypeLabel(contract.contractType)}</td>
                 <td>${contract.client || 'N/A'}</td>
                 <td>${this.utils.formatCurrency(this.utils.toNumber(contract.serviceValue))}</td>
                 <td>${this.utils.formatCurrency(scopes.reduce((sum, scope) => sum + scope.totalWithTax, 0))}</td>
@@ -128,7 +134,7 @@ class Contracts {
                 <td><span class="status ${status}">${status}</span></td>
                 <td>
                     <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')"><i class="fas fa-edit"></i></button>
-                    <button class="btn btn-sm btn-primary" onclick="contracts.showSupplementForm('${contract.id}')"><i class="fas fa-file-circle-plus"></i></button>
+                    ${canAddSupplement ? `<button class="btn btn-sm btn-primary" onclick="contracts.showSupplementForm('${contract.id}')"><i class="fas fa-file-circle-plus"></i></button>` : ''}
                     <button class="btn btn-sm btn-danger" onclick="contracts.deleteContract('${contract.id}')"><i class="fas fa-trash"></i></button>
                 </td>
             `;
@@ -145,7 +151,15 @@ class Contracts {
         const taxPercentage = this.getCompanyTaxPercentage();
         const taxPercentageRaw = this.currentCompany?.taxPercentageRaw;
         const title = contract ? 'Editar Contrato' : 'Nuevo Contrato';
+        const isSupplement = (contract?.contractType || 'contract') === 'supplement';
+        const contractTypeControl = contract
+            ? `<div class="form-group"><label>Tipo:</label><input type="text" value="${this.getContractTypeLabel(contract.contractType)}" disabled></div>`
+            : `
+                <div class="form-group"><label for="contract-type">Tipo *:</label><select id="contract-type"><option value="contract" selected>Contrato</option><option value="supplement">Suplemento</option></select></div>
+                <div class="form-group" id="contract-parent-group" style="display:none;"><label for="contract-parent-id">Contrato base *:</label><select id="contract-parent-id"><option value="">Seleccionar contrato</option></select></div>
+            `;
         const form = `
+            ${contractTypeControl}
             <div class="form-group"><label for="contract-code">Código *:</label><input type="text" id="contract-code" value="${contract?.code || ''}" required></div>
             <div class="form-group"><label for="contract-name">Nombre del contrato *:</label><input type="text" id="contract-name" value="${contract?.name || ''}" required></div>
             <div class="form-group"><label for="contract-client">Cliente *:</label><input type="text" id="contract-client" value="${contract?.client || ''}" required></div>
@@ -159,6 +173,34 @@ class Contracts {
         `;
 
         modal.show({ title, body: form, onSave: () => this.saveContract(contract?.id) });
+
+        if (!contract) {
+            this.setupContractTypeSelector();
+        }
+        if (contract && isSupplement) {
+            const status = document.getElementById('contract-status');
+            if (status) status.value = contract.status || 'activo';
+        }
+    }
+
+    async setupContractTypeSelector() {
+        const typeSelect = document.getElementById('contract-type');
+        const parentGroup = document.getElementById('contract-parent-group');
+        const parentSelect = document.getElementById('contract-parent-id');
+        if (!typeSelect || !parentGroup || !parentSelect) return;
+
+        const contractsList = await db.getAll('contracts', 'companyId', this.currentCompany.id);
+        const availableParents = contractsList.filter(item => (item.contractType || 'contract') === 'contract');
+        parentSelect.innerHTML = `<option value="">Seleccionar contrato</option>${availableParents.map(item => `<option value="${item.id}">${item.code} - ${item.name}</option>`).join('')}`;
+
+        const toggleParent = () => {
+            const showParent = typeSelect.value === 'supplement';
+            parentGroup.style.display = showParent ? 'block' : 'none';
+            parentSelect.required = showParent;
+        };
+
+        typeSelect.addEventListener('change', toggleParent);
+        toggleParent();
     }
 
     async saveContract(id = null) {
@@ -167,6 +209,8 @@ class Contracts {
             return;
         }
 
+        const contractType = id ? null : (document.getElementById('contract-type')?.value || 'contract');
+        const parentContractId = id ? null : (document.getElementById('contract-parent-id')?.value || '');
         const salaryInput = this.utils.parsePercentageInput(document.getElementById('contract-salary-percentage').value);
         const contract = {
             code: document.getElementById('contract-code').value.trim(),
@@ -183,6 +227,8 @@ class Contracts {
             description: document.getElementById('contract-description').value.trim(),
             companyId: this.currentCompany.id,
             userId: auth.currentUser.id,
+            contractType: contractType || undefined,
+            parentContractId: parentContractId || undefined,
             createdAt: id ? undefined : new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -195,6 +241,10 @@ class Contracts {
             this.showMessage('El valor del servicio debe ser mayor a 0', 'error');
             return;
         }
+        if (!id && contractType === 'supplement' && !parentContractId) {
+            this.showMessage('Selecciona el contrato base del suplemento', 'error');
+            return;
+        }
 
         try {
             if (id) {
@@ -205,11 +255,15 @@ class Contracts {
                 }
                 contract.createdAt = existingContract.createdAt;
                 contract.supplements = existingContract.supplements || [];
+                contract.contractType = existingContract.contractType || 'contract';
+                contract.parentContractId = existingContract.parentContractId || '';
                 await db.update('contracts', id, contract);
                 this.showMessage('Contrato actualizado exitosamente', 'success');
             } else {
+                contract.contractType = contractType;
+                contract.parentContractId = parentContractId;
                 await db.add('contracts', contract);
-                this.showMessage('Contrato creado exitosamente', 'success');
+                this.showMessage(contractType === 'supplement' ? 'Suplemento creado exitosamente' : 'Contrato creado exitosamente', 'success');
             }
 
             modal.hide();
