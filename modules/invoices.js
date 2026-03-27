@@ -93,7 +93,7 @@ class Invoices {
                     contractName: contract?.name || 'Sin nombre',
                     contractClient: contract?.client || 'N/A',
                     certificationLabel: certification ? this.utils.getCertificationPeriodLabel(certification) : 'Sin certificación',
-                    scopeLabel: certification?.scopeId?.startsWith('supplement:') ? 'Suplemento' : 'Contrato base',
+                    scopeLabel: certification?.scopeId?.startsWith('supplement:') ? 'Suplemento' : ((contract?.contractType || 'contract') === 'supplement' ? 'Suplemento' : 'Contrato base'),
                     paidAmount,
                     pendingAmount,
                     computedStatus: this.getInvoiceStatus(invoice, paidAmount)
@@ -186,7 +186,11 @@ class Invoices {
                 option.value = cert.id;
                 option.dataset.contractId = cert.contractId;
                 option.dataset.amount = this.utils.calculateTotalWithTax(cert.amount, companyTax);
-                option.textContent = `${this.utils.getCertificationPeriodLabel(cert)} · ${(cert.scopeId || '').startsWith('supplement:') ? 'Suplemento' : 'Contrato base'}`;
+                const selectedContract = activeContracts.find(item => item.id === cert.contractId);
+                const certScopeLabel = (cert.scopeId || '').startsWith('supplement:')
+                    ? 'Suplemento'
+                    : (((selectedContract?.contractType || 'contract') === 'supplement') ? 'Suplemento' : 'Contrato base');
+                option.textContent = `${this.utils.getCertificationPeriodLabel(cert)} · ${certScopeLabel}`;
                 if (invoice?.certificationId === cert.id) option.selected = true;
                 certificationSelect.appendChild(option);
             });
