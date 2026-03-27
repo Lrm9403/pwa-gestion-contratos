@@ -84,7 +84,7 @@ class Salary {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${item.contract?.code || 'N/A'}<br><small>${item.contract?.client || ''}</small><br><small>${this.utils.getCertificationPeriodLabel(item.certification)}</small></td>
-                <td>${this.utils.formatCurrency(item.generated)}<br><small>${this.utils.toNumber(item.contract?.salaryPercentage).toFixed(2)}%</small></td>
+                <td>${this.utils.formatCurrency(item.generated)}<br><small>${this.utils.formatPercentage(item.contract?.salaryPercentage, item.contract?.salaryPercentageRaw)}</small></td>
                 <td>${this.utils.formatCurrency(item.paid)}</td>
                 <td>${this.utils.formatCurrency(item.pending)}</td>
                 <td>
