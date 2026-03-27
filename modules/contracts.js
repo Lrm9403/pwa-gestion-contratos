@@ -30,23 +30,42 @@ class Contracts {
         return this.utils.getCompanyTaxPercentage(this.currentCompany || companies?.currentCompany);
     }
 
-    buildContractSummary(contract) {
-        const baseServiceValue = this.utils.toNumber(contract.serviceValue);
+    getContractScopeOptions(contract) {
+        const options = [{
+            id: `contract:${contract.id}`,
+            label: `${contract.code} · Contrato base`,
+            amount: this.utils.toNumber(contract.serviceValue),
+            type: 'contract'
+        }];
         const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
-        const supplementsValue = this.utils.roundMoney(
-            supplements.reduce((sum, supplement) => sum + this.utils.toNumber(supplement.amount), 0)
-        );
-        const serviceValue = this.utils.roundMoney(baseServiceValue + supplementsValue);
-        const taxPercentage = this.getCompanyTaxPercentage();
-        return {
-            baseServiceValue,
-            supplementsValue,
-            serviceValue,
-            taxPercentage,
-            totalValue: this.utils.calculateTotalWithTax(serviceValue, taxPercentage),
-            taxAmount: this.utils.calculateTaxAmount(serviceValue, taxPercentage),
-            salaryPercentage: this.utils.toNumber(contract.salaryPercentage)
-        };
+        supplements.forEach((supplement, index) => {
+            options.push({
+                id: `supplement:${supplement.id}`,
+                label: `${contract.code} · SUP-${String(index + 1).padStart(2, '0')} (${supplement.date || 's/f'})`,
+                amount: this.utils.toNumber(supplement.amount),
+                type: 'supplement',
+                supplement
+            });
+        });
+        return options;
+    }
+
+    async buildFinancialByScope(contract) {
+        const companyId = this.currentCompany?.id;
+        const [certificationsList] = await Promise.all([
+            db.getAll('certifications', 'companyId', companyId)
+        ]);
+        const companyTax = this.getCompanyTaxPercentage();
+        const scopes = this.getContractScopeOptions(contract);
+        return scopes.map(scope => {
+            const certified = certificationsList
+                .filter(cert => cert.contractId === contract.id && (cert.scopeId || `contract:${contract.id}`) === scope.id)
+                .reduce((sum, cert) => sum + this.utils.toNumber(cert.amount), 0);
+            const totalWithTax = this.utils.calculateTotalWithTax(scope.amount, companyTax);
+            const certifiedWithTax = this.utils.calculateTotalWithTax(certified, companyTax);
+            const pendingWithTax = Math.max(0, totalWithTax - certifiedWithTax);
+            return { ...scope, certified, totalWithTax, certifiedWithTax, pendingWithTax };
+        });
     }
 
     async loadContracts() {
@@ -58,8 +77,17 @@ class Contracts {
 
         try {
             const contracts = await db.getAll('contracts', 'companyId', this.currentCompany.id);
-            this.renderContracts(contracts);
-            this.updateDashboard(contracts);
+            const enriched = await Promise.all(contracts.map(async (contract) => {
+                const scopes = await this.buildFinancialByScope(contract);
+                const pending = scopes.reduce((sum, scope) => sum + scope.pendingWithTax, 0);
+                const computedStatus = pending <= 0 ? 'finalizado' : ((contract.status === 'suspendido') ? 'suspendido' : 'activo');
+                if (computedStatus !== (contract.status || 'activo')) {
+                    await db.update('contracts', contract.id, { ...contract, status: computedStatus, updatedAt: new Date().toISOString() });
+                }
+                return { ...contract, status: computedStatus, scopes };
+            }));
+            this.renderContracts(enriched);
+            this.updateDashboard(enriched);
         } catch (error) {
             console.error('Error al cargar contratos:', error);
             this.showMessage('Error al cargar contratos', 'error');
@@ -74,7 +102,7 @@ class Contracts {
         if (contracts.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" style="text-align: center; padding: 20px;">
+                    <td colspan="9" style="text-align: center; padding: 20px;">
                         No hay contratos registrados. Haz clic en "Nuevo Contrato" para agregar uno.
                     </td>
                 </tr>
@@ -83,22 +111,21 @@ class Contracts {
         }
 
         contracts.forEach(contract => {
-            const summary = this.buildContractSummary(contract);
+            const scopes = contract.scopes || [];
+            const totalPending = scopes.reduce((sum, scope) => sum + scope.pendingWithTax, 0);
+            const status = totalPending <= 0 ? 'finalizado' : ((contract.status === 'suspendido') ? 'suspendido' : 'activo');
+            const details = scopes.map(scope => `${scope.label}: Pendiente ${this.utils.formatCurrency(scope.pendingWithTax)}`).join('<br>');
+
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${contract.code || 'N/A'}</td>
                 <td>${contract.name || 'Sin nombre'}</td>
                 <td>${contract.client || 'N/A'}</td>
-                <td>
-                    ${this.utils.formatCurrency(summary.serviceValue)}<br>
-                    <small>Base: ${this.utils.formatCurrency(summary.baseServiceValue)} · Supl.: ${this.utils.formatCurrency(summary.supplementsValue)}</small>
-                </td>
-                <td>
-                    ${this.utils.formatCurrency(summary.totalValue)}<br>
-                    <small>Impuestos: ${this.utils.formatPercentage(summary.taxPercentage, companies?.currentCompany?.taxPercentageRaw)}</small>
-                </td>
-                <td>${this.utils.formatPercentage(summary.salaryPercentage, contract.salaryPercentageRaw)}</td>
-                <td><span class="status ${contract.status || 'activo'}">${contract.status || 'activo'}</span></td>
+                <td>${this.utils.formatCurrency(this.utils.toNumber(contract.serviceValue))}</td>
+                <td>${this.utils.formatCurrency(scopes.reduce((sum, scope) => sum + scope.totalWithTax, 0))}</td>
+                <td>${this.utils.formatPercentage(this.utils.toNumber(contract.salaryPercentage), contract.salaryPercentageRaw)}</td>
+                <td>${this.utils.formatCurrency(totalPending)}<br><small>${details}</small></td>
+                <td><span class="status ${status}">${status}</span></td>
                 <td>
                     <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')"><i class="fas fa-edit"></i></button>
                     <button class="btn btn-sm btn-primary" onclick="contracts.showSupplementForm('${contract.id}')"><i class="fas fa-file-circle-plus"></i></button>
@@ -119,80 +146,19 @@ class Contracts {
         const taxPercentageRaw = this.currentCompany?.taxPercentageRaw;
         const title = contract ? 'Editar Contrato' : 'Nuevo Contrato';
         const form = `
-            <div class="form-group">
-                <label for="contract-code">Código *:</label>
-                <input type="text" id="contract-code" value="${contract?.code || ''}" required>
-                <small>Código único para identificar el contrato.</small>
-            </div>
-            <div class="form-group">
-                <label for="contract-name">Nombre del contrato *:</label>
-                <input type="text" id="contract-name" value="${contract?.name || ''}" required>
-            </div>
-            <div class="form-group">
-                <label for="contract-client">Cliente *:</label>
-                <input type="text" id="contract-client" value="${contract?.client || ''}" required>
-            </div>
-            <div class="form-group">
-                <label for="contract-service-value">Valor del servicio ($) *:</label>
-                <input type="number" id="contract-service-value" step="0.01" min="0.01" value="${contract?.serviceValue || ''}" required>
-            </div>
-            <div class="form-group">
-                <label for="contract-salary-percentage">% de salario *:</label>
-                <input type="number" id="contract-salary-percentage" step="0.01" min="0" max="100" value="${contract?.salaryPercentageRaw ?? contract?.salaryPercentage ?? ''}" required>
-                <small>Este porcentaje se calcula sobre el valor del servicio y luego se aplica a cada certificación mensual.</small>
-            </div>
-            <div class="form-group">
-                <label>% de impuestos de la empresa:</label>
-                <input type="text" value="${this.utils.formatPercentage(taxPercentage, taxPercentageRaw)}" disabled>
-                <small>El porcentaje de impuestos se configura en la empresa seleccionada.</small>
-            </div>
-            <div class="form-group">
-                <label for="contract-start-date">Fecha de inicio:</label>
-                <input type="date" id="contract-start-date" value="${contract?.startDate || ''}">
-            </div>
-            <div class="form-group">
-                <label for="contract-end-date">Fecha de fin:</label>
-                <input type="date" id="contract-end-date" value="${contract?.endDate || ''}">
-            </div>
-            <div class="form-group">
-                <label for="contract-status">Estado:</label>
-                <select id="contract-status">
-                    <option value="activo" ${(contract?.status || 'activo') === 'activo' ? 'selected' : ''}>Activo</option>
-                    <option value="finalizado" ${contract?.status === 'finalizado' ? 'selected' : ''}>Finalizado</option>
-                    <option value="suspendido" ${contract?.status === 'suspendido' ? 'selected' : ''}>Suspendido</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="contract-description">Descripción:</label>
-                <textarea id="contract-description" rows="3">${contract?.description || ''}</textarea>
-            </div>
-            <div id="contract-preview" style="background:#f5f5f5;padding:15px;border-radius:5px;margin-top:15px;display:none;">
-                <h4>Resumen</h4>
-                <p><strong>Valor del servicio:</strong> <span id="contract-preview-service">$0.00</span></p>
-                <p><strong>Impuestos:</strong> <span id="contract-preview-tax">$0.00</span> (${this.utils.formatPercentage(taxPercentage, taxPercentageRaw)})</p>
-                <p><strong>Valor total:</strong> <span id="contract-preview-total">$0.00</span></p>
-                <p><strong>% salario:</strong> <span id="contract-preview-salary-rate">0%</span></p>
-            </div>
+            <div class="form-group"><label for="contract-code">Código *:</label><input type="text" id="contract-code" value="${contract?.code || ''}" required></div>
+            <div class="form-group"><label for="contract-name">Nombre del contrato *:</label><input type="text" id="contract-name" value="${contract?.name || ''}" required></div>
+            <div class="form-group"><label for="contract-client">Cliente *:</label><input type="text" id="contract-client" value="${contract?.client || ''}" required></div>
+            <div class="form-group"><label for="contract-service-value">Valor del servicio ($) *:</label><input type="number" id="contract-service-value" step="0.0000001" min="0.0000001" value="${contract?.serviceValue || ''}" required></div>
+            <div class="form-group"><label for="contract-salary-percentage">% de salario *:</label><input type="number" id="contract-salary-percentage" step="0.0000001" min="0" max="100" value="${contract?.salaryPercentageRaw ?? contract?.salaryPercentage ?? ''}" required></div>
+            <div class="form-group"><label>% de impuestos de la empresa:</label><input type="text" value="${this.utils.formatPercentage(taxPercentage, taxPercentageRaw)}" disabled></div>
+            <div class="form-group"><label for="contract-start-date">Fecha de inicio:</label><input type="date" id="contract-start-date" value="${contract?.startDate || ''}"></div>
+            <div class="form-group"><label for="contract-end-date">Fecha de fin:</label><input type="date" id="contract-end-date" value="${contract?.endDate || ''}"></div>
+            <div class="form-group"><label for="contract-status">Estado:</label><select id="contract-status"><option value="activo" ${(contract?.status || 'activo') === 'activo' ? 'selected' : ''}>Activo</option><option value="finalizado" ${contract?.status === 'finalizado' ? 'selected' : ''}>Finalizado</option><option value="suspendido" ${contract?.status === 'suspendido' ? 'selected' : ''}>Suspendido</option></select></div>
+            <div class="form-group"><label for="contract-description">Descripción:</label><textarea id="contract-description" rows="3">${contract?.description || ''}</textarea></div>
         `;
 
         modal.show({ title, body: form, onSave: () => this.saveContract(contract?.id) });
-
-        const serviceInput = document.getElementById('contract-service-value');
-        const salaryInput = document.getElementById('contract-salary-percentage');
-        const preview = document.getElementById('contract-preview');
-        const updatePreview = () => {
-            const serviceValue = this.utils.toNumber(serviceInput.value);
-            const salary = this.utils.parsePercentageInput(salaryInput.value);
-            preview.style.display = serviceValue > 0 ? 'block' : 'none';
-            document.getElementById('contract-preview-service').textContent = this.utils.formatCurrency(serviceValue);
-            document.getElementById('contract-preview-tax').textContent = this.utils.formatCurrency(this.utils.calculateTaxAmount(serviceValue, taxPercentage));
-            document.getElementById('contract-preview-total').textContent = this.utils.formatCurrency(this.utils.calculateTotalWithTax(serviceValue, taxPercentage));
-            document.getElementById('contract-preview-salary-rate').textContent = this.utils.formatPercentage(salary.value, salary.raw);
-        };
-
-        serviceInput?.addEventListener('input', updatePreview);
-        salaryInput?.addEventListener('input', updatePreview);
-        if (contract?.serviceValue) updatePreview();
     }
 
     async saveContract(id = null) {
@@ -229,10 +195,6 @@ class Contracts {
             this.showMessage('El valor del servicio debe ser mayor a 0', 'error');
             return;
         }
-        if (contract.salaryPercentage < 0 || contract.salaryPercentage > 100) {
-            this.showMessage('El porcentaje de salario debe estar entre 0 y 100', 'error');
-            return;
-        }
 
         try {
             if (id) {
@@ -242,6 +204,7 @@ class Contracts {
                     return;
                 }
                 contract.createdAt = existingContract.createdAt;
+                contract.supplements = existingContract.supplements || [];
                 await db.update('contracts', id, contract);
                 this.showMessage('Contrato actualizado exitosamente', 'success');
             } else {
@@ -254,13 +217,6 @@ class Contracts {
             await certifications?.loadCertifications?.();
             await invoices?.loadInvoices?.();
             await salary?.updateSalarySummary?.();
-
-            await db.addActivity({
-                userId: auth.currentUser.id,
-                companyId: this.currentCompany.id,
-                type: id ? 'contract_update' : 'contract_create',
-                description: `${id ? 'Actualizado' : 'Creado'} contrato ${contract.code} - ${contract.name}`
-            });
         } catch (error) {
             console.error('Error al guardar contrato:', error);
             this.showMessage(`Error al guardar el contrato: ${error.message}`, 'error');
@@ -269,11 +225,8 @@ class Contracts {
 
     async editContract(id) {
         const contract = await db.get('contracts', id);
-        if (contract) {
-            this.showContractForm(contract);
-        } else {
-            this.showMessage('Contrato no encontrado', 'error');
-        }
+        if (contract) this.showContractForm(contract);
+        else this.showMessage('Contrato no encontrado', 'error');
     }
 
     async showSupplementForm(contractId) {
@@ -284,36 +237,18 @@ class Contracts {
         }
 
         const form = `
-            <div class="form-group">
-                <label for="supplement-amount">Monto suplemento ($) *:</label>
-                <input type="number" id="supplement-amount" step="0.01" min="0.01" required>
-            </div>
-            <div class="form-group">
-                <label for="supplement-date">Fecha *:</label>
-                <input type="date" id="supplement-date" value="${new Date().toISOString().split('T')[0]}" required>
-            </div>
-            <div class="form-group">
-                <label for="supplement-description">Descripción:</label>
-                <textarea id="supplement-description" rows="3" placeholder="Motivo o detalle del suplemento"></textarea>
-            </div>
-            <div style="background:#f5f5f5;padding:12px;border-radius:6px;">
-                <p><strong>Contrato:</strong> ${contract.code} - ${contract.name || 'Sin nombre'}</p>
-                <p><strong>Valor base:</strong> ${this.utils.formatCurrency(contract.serviceValue)}</p>
-            </div>
+            <div class="form-group"><label for="supplement-amount">Monto suplemento ($) *:</label><input type="number" id="supplement-amount" step="0.0000001" min="0.0000001" required></div>
+            <div class="form-group"><label for="supplement-date">Fecha *:</label><input type="date" id="supplement-date" value="${new Date().toISOString().split('T')[0]}" required></div>
+            <div class="form-group"><label for="supplement-description">Descripción:</label><textarea id="supplement-description" rows="3"></textarea></div>
         `;
 
-        modal.show({
-            title: `Nuevo suplemento - ${contract.code}`,
-            body: form,
-            onSave: () => this.saveSupplement(contractId)
-        });
+        modal.show({ title: `Nuevo suplemento - ${contract.code}`, body: form, onSave: () => this.saveSupplement(contractId) });
     }
 
     async saveSupplement(contractId) {
         const amount = this.utils.toNumber(document.getElementById('supplement-amount').value);
         const date = document.getElementById('supplement-date').value;
         const description = document.getElementById('supplement-description').value.trim();
-
         if (amount <= 0 || !date) {
             this.showMessage('Completa correctamente el suplemento', 'error');
             return;
@@ -327,19 +262,9 @@ class Contracts {
             }
 
             const supplements = Array.isArray(contract.supplements) ? [...contract.supplements] : [];
-            supplements.push({
-                id: `sup_${Date.now()}`,
-                amount,
-                date,
-                description
-            });
+            supplements.push({ id: `sup_${Date.now()}`, amount, date, description });
 
-            await db.update('contracts', contractId, {
-                ...contract,
-                supplements,
-                updatedAt: new Date().toISOString()
-            });
-
+            await db.update('contracts', contractId, { ...contract, supplements, updatedAt: new Date().toISOString() });
             modal.hide();
             this.showMessage('Suplemento agregado exitosamente', 'success');
             await this.loadContracts();
@@ -353,17 +278,13 @@ class Contracts {
     }
 
     async deleteContract(id) {
-        if (!confirm('¿Estás seguro de eliminar este contrato? También se eliminarán certificaciones, facturas y pagos asociados.')) {
-            return;
-        }
-
+        if (!confirm('¿Estás seguro de eliminar este contrato? También se eliminarán certificaciones, facturas y pagos asociados.')) return;
         try {
             const [certificationsList, invoicesList, paymentsList] = await Promise.all([
                 db.getAll('certifications', 'contractId', id),
                 db.getAll('invoices', 'contractId', id),
                 db.getAll('payments', 'contractId', id)
             ]);
-
             for (const cert of certificationsList) await db.delete('certifications', cert.id);
             for (const invoice of invoicesList) await db.delete('invoices', invoice.id);
             for (const payment of paymentsList) await db.delete('payments', payment.id);
@@ -391,17 +312,12 @@ class Contracts {
     updateDashboard(contracts = []) {
         const activeContracts = contracts.filter(contract => (contract.status || 'activo') === 'activo').length;
         const activeContractsElement = document.getElementById('active-contracts');
-        if (activeContractsElement) {
-            activeContractsElement.textContent = activeContracts;
-        }
+        if (activeContractsElement) activeContractsElement.textContent = activeContracts;
     }
 
     showMessage(message, type) {
-        if (window.auth?.showMessage) {
-            auth.showMessage(message, type);
-        } else {
-            alert(message);
-        }
+        if (window.auth?.showMessage) auth.showMessage(message, type);
+        else alert(message);
     }
 }
 
