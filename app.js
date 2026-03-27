@@ -4,13 +4,14 @@ window.contractAppUtils = {
         return Number.isFinite(number) ? number : 0;
     },
 
-    normalizeDecimal(value, decimals = 4) {
-        const factor = 10 ** decimals;
-        return Math.round((this.toNumber(value) + Number.EPSILON) * factor) / factor;
+    normalizeDecimal(value, decimals = 8) {
+        const num = this.toNumber(value);
+        if (!Number.isFinite(num)) return 0;
+        return Number.parseFloat(num.toFixed(decimals));
     },
 
     roundMoney(value) {
-        return this.normalizeDecimal(value, 2);
+        return this.toNumber(value);
     },
 
     parsePercentageInput(rawValue) {
@@ -29,7 +30,8 @@ window.contractAppUtils = {
     },
 
     formatCurrency(value) {
-        return `$${this.roundMoney(value).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const number = this.toNumber(value);
+        return `$${number.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
     },
 
     getCompanyTaxPercentage(company) {
@@ -41,15 +43,15 @@ window.contractAppUtils = {
     },
 
     calculateTaxAmount(baseAmount, taxPercentage) {
-        return this.roundMoney(this.toNumber(baseAmount) * (this.toNumber(taxPercentage) / 100));
+        return this.toNumber(baseAmount) * (this.toNumber(taxPercentage) / 100);
     },
 
     calculateTotalWithTax(baseAmount, taxPercentage) {
-        return this.roundMoney(this.toNumber(baseAmount) + this.calculateTaxAmount(baseAmount, taxPercentage));
+        return this.toNumber(baseAmount) + this.calculateTaxAmount(baseAmount, taxPercentage);
     },
 
     calculateSalaryAmount(baseAmount, salaryPercentage) {
-        return this.roundMoney(this.toNumber(baseAmount) * (this.toNumber(salaryPercentage) / 100));
+        return this.toNumber(baseAmount) * (this.toNumber(salaryPercentage) / 100);
     },
 
     getCertificationPeriodLabel(certification) {
