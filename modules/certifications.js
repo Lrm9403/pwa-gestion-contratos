@@ -68,7 +68,8 @@ class Certifications {
 
     getContractScope(contract, scopeId) {
         if (!scopeId || scopeId === `contract:${contract.id}`) {
-            return { label: 'Contrato base', amount: this.utils.toNumber(contract.serviceValue) };
+            const baseLabel = (contract.contractType || 'contract') === 'supplement' ? 'Suplemento' : 'Contrato base';
+            return { label: baseLabel, amount: this.utils.toNumber(contract.serviceValue) };
         }
         const supplement = (contract.supplements || []).find(item => `supplement:${item.id}` === scopeId);
         if (!supplement) return { label: 'Suplemento', amount: 0 };
@@ -175,7 +176,8 @@ class Certifications {
         }
 
         const scopeOptions = activeContracts.flatMap(contract => {
-            const base = [{ value: `contract:${contract.id}`, contractId: contract.id, salary: contract.salaryPercentage, label: `${contract.code} - ${contract.name} (Contrato base)` }];
+            const baseLabel = (contract.contractType || 'contract') === 'supplement' ? 'Suplemento' : 'Contrato base';
+            const base = [{ value: `contract:${contract.id}`, contractId: contract.id, salary: contract.salaryPercentage, label: `${contract.code} - ${contract.name} (${baseLabel})` }];
             const supplements = (contract.supplements || []).map((supp, index) => ({
                 value: `supplement:${supp.id}`,
                 contractId: contract.id,
