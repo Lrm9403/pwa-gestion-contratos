@@ -219,7 +219,7 @@ class ExportManager {
             doc.text(`Reporte - ${companies.currentCompany.name}`, 20, 20);
             doc.setFontSize(12);
             doc.text(`Generado el: ${new Date().toLocaleDateString('es-ES')}`, 20, 30);
-            doc.text(`Impuestos empresa: ${companyTax.toFixed(2)}%`, 20, 37);
+            doc.text(`Impuestos empresa: ${this.utils.formatPercentage(companyTax, companies.currentCompany.taxPercentageRaw)}`, 20, 37);
 
             const totalContracts = contractsList.length;
             const totalCertifications = certificationsList.length;
@@ -244,9 +244,9 @@ class ExportManager {
                     contract.code,
                     contract.client,
                     this.utils.formatCurrency(this.getContractSummary(contract, companyTax).serviceValue),
-                    `${companyTax.toFixed(2)}%`,
+                    this.utils.formatPercentage(companyTax, companies.currentCompany.taxPercentageRaw),
                     this.utils.formatCurrency(this.getContractSummary(contract, companyTax).totalWithTax),
-                    `${this.utils.toNumber(contract.salaryPercentage).toFixed(2)}%`
+                    this.utils.formatPercentage(this.utils.toNumber(contract.salaryPercentage), contract.salaryPercentageRaw)
                 ]),
                 theme: 'striped',
                 headStyles: { fillColor: [26, 35, 126] }
