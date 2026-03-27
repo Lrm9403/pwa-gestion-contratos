@@ -9,22 +9,70 @@ class Certifications {
         document.addEventListener('companyChanged', () => this.loadCertifications());
     }
 
+    getTodayPeriod() {
+        const now = new Date();
+        return { month: now.getMonth() + 1, year: now.getFullYear() };
+    }
+
+    isFuturePeriod(month, year) {
+        const today = this.getTodayPeriod();
+        return year > today.year || (year === today.year && month > today.month);
+    }
+
     async getCompanyContractsData() {
         const companyId = companies?.currentCompany?.id;
-        const [contractsList, certificationsList, paymentsList] = await Promise.all([
+        const [contractsList, certificationsList, paymentsList, invoicesList] = await Promise.all([
             db.getAll('contracts', 'companyId', companyId),
             db.getAll('certifications', 'companyId', companyId),
-            db.getAll('payments', 'companyId', companyId)
+            db.getAll('payments', 'companyId', companyId),
+            db.getAll('invoices', 'companyId', companyId)
         ]);
-        return { contractsList, certificationsList, paymentsList };
+        return { contractsList, certificationsList, paymentsList, invoicesList };
+    }
+
+    async syncCertificationStatuses() {
+        const { certificationsList, invoicesList, paymentsList } = await this.getCompanyContractsData();
+        const paidInvoiceIds = new Set();
+        const invoicePaidMap = new Map();
+        paymentsList.filter(p => p.purpose === 'invoice').forEach(payment => {
+            (payment.allocations || []).forEach(a => {
+                const current = invoicePaidMap.get(a.invoiceId) || 0;
+                invoicePaidMap.set(a.invoiceId, current + this.utils.toNumber(a.amount));
+            });
+        });
+
+        invoicesList.forEach(invoice => {
+            const paid = invoicePaidMap.get(invoice.id) || 0;
+            if ((invoice.manualStatus || invoice.status) === 'pagado' || paid >= this.utils.toNumber(invoice.amount)) {
+                paidInvoiceIds.add(invoice.id);
+            }
+        });
+
+        for (const cert of certificationsList) {
+            const certInvoices = invoicesList.filter(inv => inv.certificationId === cert.id);
+            const shouldBeApproved = certInvoices.length > 0 && certInvoices.every(inv => paidInvoiceIds.has(inv.id));
+            const nextStatus = shouldBeApproved ? 'aprobado' : 'pendiente';
+            if (nextStatus !== cert.status) {
+                await db.update('certifications', cert.id, { ...cert, status: nextStatus, updatedAt: new Date().toISOString() });
+            }
+        }
     }
 
     getSalaryPaidForCertification(certification, paymentsList) {
-        return this.utils.roundMoney(paymentsList
+        return paymentsList
             .filter(payment => payment.purpose === 'salary')
             .flatMap(payment => payment.allocations || [])
             .filter(allocation => allocation.certificationId === certification.id)
-            .reduce((sum, allocation) => sum + this.utils.toNumber(allocation.amount), 0));
+            .reduce((sum, allocation) => sum + this.utils.toNumber(allocation.amount), 0);
+    }
+
+    getContractScope(contract, scopeId) {
+        if (!scopeId || scopeId === `contract:${contract.id}`) {
+            return { label: 'Contrato base', amount: this.utils.toNumber(contract.serviceValue) };
+        }
+        const supplement = (contract.supplements || []).find(item => `supplement:${item.id}` === scopeId);
+        if (!supplement) return { label: 'Suplemento', amount: 0 };
+        return { label: `Suplemento (${supplement.date || 's/f'})`, amount: this.utils.toNumber(supplement.amount) };
     }
 
     async loadCertifications() {
@@ -34,36 +82,43 @@ class Certifications {
         }
 
         try {
+            await this.syncCertificationStatuses();
             const { contractsList, certificationsList, paymentsList } = await this.getCompanyContractsData();
             const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
 
             const enrichedCerts = certificationsList.map(certification => {
                 const contract = contractsList.find(contractItem => contractItem.id === certification.contractId);
-                const contractCertifications = certificationsList
-                    .filter(item => item.contractId === certification.contractId)
+                const scopeId = certification.scopeId || `contract:${certification.contractId}`;
+                const scope = contract ? this.getContractScope(contract, scopeId) : { label: 'N/A', amount: 0 };
+                const sameScopeCerts = certificationsList
+                    .filter(item => item.contractId === certification.contractId && (item.scopeId || `contract:${item.contractId}`) === scopeId)
                     .sort((a, b) => this.utils.comparePeriods(a, b));
-                const certifiedToDate = contractCertifications
+                const certifiedToDate = sameScopeCerts
                     .filter(item => this.utils.comparePeriods(item, certification) <= 0)
                     .reduce((sum, item) => sum + this.utils.calculateTotalWithTax(item.amount, companyTax), 0);
+
                 const salaryGenerated = this.utils.calculateSalaryAmount(certification.amount, contract?.salaryPercentage || 0);
                 const salaryPaid = this.getSalaryPaidForCertification(certification, paymentsList);
-                const salaryPending = this.utils.roundMoney(Math.max(0, salaryGenerated - salaryPaid));
+                const salaryPending = Math.max(0, salaryGenerated - salaryPaid);
                 const certifiedWithTax = this.utils.calculateTotalWithTax(certification.amount, companyTax);
-                const contractTotal = this.utils.calculateTotalWithTax(contract?.serviceValue || 0, companyTax);
-                const pendingContractAmount = this.utils.roundMoney(Math.max(0, contractTotal - certifiedToDate));
+                const scopeTotal = this.utils.calculateTotalWithTax(scope.amount, companyTax);
+                const pendingScopeAmount = Math.max(0, scopeTotal - certifiedToDate);
 
                 return {
                     ...certification,
+                    scopeId,
+                    scopeLabel: scope.label,
                     contractCode: contract?.code || 'N/A',
+                    contractName: contract?.name || 'Sin nombre',
                     contractClient: contract?.client || 'N/A',
-                    contractTotal,
+                    contractTotal: scopeTotal,
                     certifiedWithTax,
-                    pendingContractAmount,
+                    pendingContractAmount: pendingScopeAmount,
                     salaryPercentage: this.utils.toNumber(contract?.salaryPercentage),
                     salaryGenerated,
                     salaryPaid,
                     salaryPending,
-                    statusLabel: salaryPending <= 0 ? 'pagado' : salaryPaid > 0 ? 'parcial' : (certification.status || 'pendiente')
+                    statusLabel: certification.status || 'pendiente'
                 };
             }).sort((a, b) => this.utils.comparePeriods(b, a));
 
@@ -80,30 +135,18 @@ class Certifications {
 
         tbody.innerHTML = '';
         if (certifications.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" style="text-align: center; padding: 20px;">
-                        No hay certificaciones registradas. Haz clic en "Nueva Certificación" para agregar una.
-                    </td>
-                </tr>
-            `;
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px;">No hay certificaciones registradas. Haz clic en "Nueva Certificación" para agregar una.</td></tr>`;
             return;
         }
 
         certifications.forEach(cert => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${cert.contractCode}<br><small>${cert.contractClient}</small></td>
+                <td>${cert.contractCode} - ${cert.contractName}<br><small>${cert.contractClient}</small><br><small>${cert.scopeLabel}</small></td>
                 <td>${this.getMonthName(cert.month)}/${cert.year}</td>
                 <td>${this.utils.formatCurrency(cert.amount)}</td>
-                <td>
-                    ${this.utils.formatCurrency(cert.certifiedWithTax)}<br>
-                    <small>Pendiente contrato: ${this.utils.formatCurrency(cert.pendingContractAmount)}</small>
-                </td>
-                <td>
-                    ${this.utils.formatCurrency(cert.salaryGenerated)}<br>
-                    <small>Pagado: ${this.utils.formatCurrency(cert.salaryPaid)} · Pendiente: ${this.utils.formatCurrency(cert.salaryPending)}</small>
-                </td>
+                <td>${this.utils.formatCurrency(cert.certifiedWithTax)}<br><small>Pendiente alcance: ${this.utils.formatCurrency(cert.pendingContractAmount)}</small></td>
+                <td>${this.utils.formatCurrency(cert.salaryGenerated)}<br><small>Pagado: ${this.utils.formatCurrency(cert.salaryPaid)} · Pendiente: ${this.utils.formatCurrency(cert.salaryPending)}</small></td>
                 <td><span class="status ${cert.statusLabel}">${cert.statusLabel}</span></td>
                 <td>
                     <button class="btn btn-sm btn-success" onclick="certifications.editCertification('${cert.id}')"><i class="fas fa-edit"></i></button>
@@ -125,99 +168,53 @@ class Certifications {
         }
 
         const contractsList = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
-        const activeContracts = contractsList.filter(contract => (contract.status || 'activo') === 'activo');
+        const activeContracts = contractsList.filter(contract => (contract.status || 'activo') !== 'suspendido');
         if (activeContracts.length === 0) {
-            this.showMessage('No hay contratos activos para crear certificaciones', 'error');
+            this.showMessage('No hay contratos para crear certificaciones', 'error');
             return;
         }
 
-        const contractOptions = activeContracts.map(contract => `
-            <option value="${contract.id}" data-salary="${contract.salaryPercentage}" ${certification?.contractId === contract.id ? 'selected' : ''}>
-                ${contract.code} - ${contract.client}
-            </option>
-        `).join('');
-
-        const form = `
-            <div class="form-group">
-                <label for="cert-contract">Contrato *:</label>
-                <select id="cert-contract" required>
-                    <option value="">Seleccionar contrato</option>
-                    ${contractOptions}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="cert-month">Mes *:</label>
-                <select id="cert-month" required>
-                    <option value="">Seleccionar mes</option>
-                    ${Array.from({ length: 12 }, (_, index) => `
-                        <option value="${index + 1}" ${certification?.month === index + 1 ? 'selected' : ''}>
-                            ${['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'][index]}
-                        </option>
-                    `).join('')}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="cert-year">Año *:</label>
-                <input type="number" id="cert-year" min="2020" max="2100" value="${certification?.year || new Date().getFullYear()}" required>
-            </div>
-            <div class="form-group">
-                <label for="cert-amount">Monto certificado ($) *:</label>
-                <input type="number" id="cert-amount" step="0.01" min="0.01" value="${certification?.amount || ''}" required>
-                <small>Sobre este monto se calcularán impuestos y salario generado.</small>
-            </div>
-            <div class="form-group">
-                <label for="cert-status">Estado:</label>
-                <select id="cert-status">
-                    <option value="pendiente" ${(certification?.status || 'pendiente') === 'pendiente' ? 'selected' : ''}>Pendiente</option>
-                    <option value="aprobado" ${certification?.status === 'aprobado' ? 'selected' : ''}>Aprobado</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="cert-notes">Notas:</label>
-                <textarea id="cert-notes" rows="3">${certification?.notes || ''}</textarea>
-            </div>
-            <div id="cert-preview" style="background:#f5f5f5;padding:15px;border-radius:5px;margin-top:15px;display:none;">
-                <h4>Resumen</h4>
-                <p><strong>Monto certificado:</strong> <span id="preview-service">$0.00</span></p>
-                <p><strong>Monto certificado + impuestos:</strong> <span id="preview-contract">$0.00</span></p>
-                <p><strong>Salario generado:</strong> <span id="preview-salary">$0.00</span> (<span id="preview-percentage">0</span>%)</p>
-            </div>
-        `;
-
-        modal.show({
-            title: certification ? 'Editar Certificación' : 'Nueva Certificación',
-            body: form,
-            onSave: () => this.saveCertification(certification?.id)
+        const scopeOptions = activeContracts.flatMap(contract => {
+            const base = [{ value: `contract:${contract.id}`, contractId: contract.id, salary: contract.salaryPercentage, label: `${contract.code} - ${contract.name} (Contrato base)` }];
+            const supplements = (contract.supplements || []).map((supp, index) => ({
+                value: `supplement:${supp.id}`,
+                contractId: contract.id,
+                salary: contract.salaryPercentage,
+                label: `${contract.code} - ${contract.name} (SUP-${String(index + 1).padStart(2, '0')} · ${supp.date || 's/f'})`
+            }));
+            return [...base, ...supplements];
         });
 
-        const amountInput = document.getElementById('cert-amount');
-        const contractSelect = document.getElementById('cert-contract');
-        const previewDiv = document.getElementById('cert-preview');
-        const updatePreview = () => {
-            const amount = this.utils.toNumber(amountInput.value);
-            const salaryPercentage = this.utils.toNumber(contractSelect.selectedOptions[0]?.dataset.salary);
-            const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
-            previewDiv.style.display = amount > 0 ? 'block' : 'none';
-            document.getElementById('preview-service').textContent = this.utils.formatCurrency(amount);
-            document.getElementById('preview-contract').textContent = this.utils.formatCurrency(this.utils.calculateTotalWithTax(amount, companyTax));
-            document.getElementById('preview-salary').textContent = this.utils.formatCurrency(this.utils.calculateSalaryAmount(amount, salaryPercentage));
-            document.getElementById('preview-percentage').textContent = salaryPercentage.toFixed(2);
-        };
-        amountInput?.addEventListener('input', updatePreview);
-        contractSelect?.addEventListener('change', updatePreview);
-        if (certification?.amount) updatePreview();
+        const selectedScope = certification?.scopeId || `contract:${certification?.contractId || ''}`;
+
+        const form = `
+            <div class="form-group"><label for="cert-scope">Contrato/Suplemento *:</label><select id="cert-scope" required><option value="">Seleccionar</option>${scopeOptions.map(o => `<option value="${o.value}" data-contract-id="${o.contractId}" data-salary="${o.salary}" ${selectedScope === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}</select></div>
+            <div class="form-group"><label for="cert-month">Mes *:</label><select id="cert-month" required><option value="">Seleccionar mes</option>${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${certification?.month === index + 1 ? 'selected' : ''}>${['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'][index]}</option>`).join('')}</select></div>
+            <div class="form-group"><label for="cert-year">Año *:</label><input type="number" id="cert-year" min="2020" max="2100" value="${certification?.year || new Date().getFullYear()}" required></div>
+            <div class="form-group"><label for="cert-amount">Monto certificado ($) *:</label><input type="number" id="cert-amount" step="0.0000001" min="0.0000001" value="${certification?.amount || ''}" required></div>
+            <div class="form-group"><label for="cert-status">Estado:</label><select id="cert-status"><option value="pendiente" ${(certification?.status || 'pendiente') === 'pendiente' ? 'selected' : ''}>Pendiente</option><option value="aprobado" ${certification?.status === 'aprobado' ? 'selected' : ''}>Aprobado</option></select></div>
+            <div class="form-group"><label for="cert-notes">Notas:</label><textarea id="cert-notes" rows="3">${certification?.notes || ''}</textarea></div>
+        `;
+
+        modal.show({ title: certification ? 'Editar Certificación' : 'Nueva Certificación', body: form, onSave: () => this.saveCertification(certification?.id) });
     }
 
     async saveCertification(id = null) {
-        const contractId = document.getElementById('cert-contract').value;
+        const scopeSelect = document.getElementById('cert-scope');
+        const scopeId = scopeSelect.value;
+        const contractId = scopeSelect.selectedOptions[0]?.dataset.contractId || '';
         const month = Number.parseInt(document.getElementById('cert-month').value, 10);
         const year = Number.parseInt(document.getElementById('cert-year').value, 10);
         const amount = this.utils.toNumber(document.getElementById('cert-amount').value);
         const status = document.getElementById('cert-status').value;
         const notes = document.getElementById('cert-notes').value.trim();
 
-        if (!contractId || !month || !year || amount <= 0) {
+        if (!scopeId || !contractId || !month || !year || amount <= 0) {
             this.showMessage('Completa todos los campos requeridos correctamente', 'error');
+            return;
+        }
+        if (this.isFuturePeriod(month, year)) {
+            this.showMessage('No puedes registrar certificaciones de meses futuros', 'error');
             return;
         }
 
@@ -228,15 +225,16 @@ class Certifications {
                 return;
             }
 
-            const existingCerts = await db.getAll('certifications', 'contractId', contractId);
-            const duplicate = existingCerts.find(item => item.id !== id && item.month === month && item.year === year);
+            const existingCerts = await db.getAll('certifications', 'companyId', companies.currentCompany.id);
+            const duplicate = existingCerts.find(item => item.id !== id && item.contractId === contractId && (item.scopeId || `contract:${item.contractId}`) === scopeId && item.month === month && item.year === year);
             if (duplicate) {
-                this.showMessage(`Ya existe una certificación para ${month}/${year} en este contrato`, 'error');
+                this.showMessage(`Ya existe una certificación para ${month}/${year} en este contrato/suplemento`, 'error');
                 return;
             }
 
             const certification = {
                 contractId,
+                scopeId,
                 month,
                 year,
                 amount,
@@ -252,6 +250,10 @@ class Certifications {
 
             if (id) {
                 const existing = await db.get('certifications', id);
+                if (!existing) {
+                    this.showMessage('Certificación no encontrada', 'error');
+                    return;
+                }
                 certification.createdAt = existing.createdAt;
                 await db.update('certifications', id, certification);
                 this.showMessage('Certificación actualizada exitosamente', 'success');
@@ -273,11 +275,8 @@ class Certifications {
 
     async editCertification(id) {
         const certification = await db.get('certifications', id);
-        if (certification) {
-            this.showCertificationForm(certification);
-        } else {
-            this.showMessage('Certificación no encontrada', 'error');
-        }
+        if (certification) this.showCertificationForm(certification);
+        else this.showMessage('Certificación no encontrada', 'error');
     }
 
     async deleteCertification(id) {
@@ -286,15 +285,11 @@ class Certifications {
         try {
             const paymentsList = await db.getAll('payments', 'companyId', companies.currentCompany.id);
             const certificationPayments = paymentsList.filter(payment => (payment.allocations || []).some(allocation => allocation.certificationId === id));
-            for (const payment of certificationPayments) {
-                await db.delete('payments', payment.id);
-            }
+            for (const payment of certificationPayments) await db.delete('payments', payment.id);
 
             const invoicesList = await db.getAll('invoices', 'companyId', companies.currentCompany.id);
             const certificationInvoices = invoicesList.filter(invoice => invoice.certificationId === id);
-            for (const invoice of certificationInvoices) {
-                await db.delete('invoices', invoice.id);
-            }
+            for (const invoice of certificationInvoices) await db.delete('invoices', invoice.id);
 
             await db.delete('certifications', id);
             this.showMessage('Certificación eliminada exitosamente', 'success');
@@ -309,11 +304,8 @@ class Certifications {
     }
 
     showMessage(message, type) {
-        if (window.auth?.showMessage) {
-            auth.showMessage(message, type);
-        } else {
-            alert(message);
-        }
+        if (window.auth?.showMessage) auth.showMessage(message, type);
+        else alert(message);
     }
 }
 
