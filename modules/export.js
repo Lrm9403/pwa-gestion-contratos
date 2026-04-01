@@ -35,7 +35,7 @@ class ExportManager {
         const baseServiceValue = this.utils.toNumber(contract.serviceValue);
         const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
         const supplementsValue = this.utils.roundMoney(
-            supplements.reduce((sum, supplement) => sum + this.utils.toNumber(supplement.amount), 0)
+            supplements.reduce((sum, supplement) => sum + this.utils.toNumber(supplement.serviceValue ?? supplement.amount), 0)
         );
         const serviceValue = this.utils.roundMoney(baseServiceValue + supplementsValue);
         return {
@@ -99,9 +99,11 @@ class ExportManager {
                 if (supplements.length === 0) return [];
                 return supplements.map(supplement => ({
                     'Contrato': contract.code,
+                    'Código Suplemento': supplement.code || '',
+                    'Nombre Suplemento': supplement.name || '',
                     'Nombre Contrato': contract.name || '',
                     'Fecha': supplement.date || '',
-                    'Monto': this.utils.toNumber(supplement.amount),
+                    'Monto': this.utils.toNumber(supplement.serviceValue ?? supplement.amount),
                     'Descripción': supplement.description || ''
                 }));
             });
@@ -300,8 +302,10 @@ class ExportManager {
             const supplementsRows = contractsList.flatMap(contract =>
                 (Array.isArray(contract.supplements) ? contract.supplements : []).map(supplement => [
                     contract.code,
+                    supplement.code || '',
+                    supplement.name || '',
                     supplement.date || '',
-                    this.utils.formatCurrency(supplement.amount),
+                    this.utils.formatCurrency(supplement.serviceValue ?? supplement.amount),
                     supplement.description || ''
                 ])
             );
@@ -309,7 +313,7 @@ class ExportManager {
                 doc.addPage();
                 doc.autoTable({
                     startY: 20,
-                    head: [['Contrato', 'Fecha', 'Monto', 'Descripción']],
+                    head: [['Contrato', 'Código', 'Nombre', 'Fecha', 'Monto', 'Descripción']],
                     body: supplementsRows,
                     theme: 'striped',
                     headStyles: { fillColor: [63, 81, 181] }
