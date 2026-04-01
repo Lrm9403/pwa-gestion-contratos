@@ -154,10 +154,7 @@ class Contracts {
         const isSupplement = (contract?.contractType || 'contract') === 'supplement';
         const contractTypeControl = contract
             ? `<div class="form-group"><label>Tipo:</label><input type="text" value="${this.getContractTypeLabel(contract.contractType)}" disabled></div>`
-            : `
-                <div class="form-group"><label for="contract-type">Tipo *:</label><select id="contract-type"><option value="contract" selected>Contrato</option><option value="supplement">Suplemento</option></select></div>
-                <div class="form-group" id="contract-parent-group" style="display:none;"><label for="contract-parent-id">Contrato base *:</label><select id="contract-parent-id"><option value="">Seleccionar contrato</option></select></div>
-            `;
+            : `<div class="form-group"><label>Tipo:</label><input type="text" value="Contrato" disabled><small>Los suplementos se registran desde el botón <strong>+</strong> de cada contrato.</small></div>`;
         const form = `
             ${contractTypeControl}
             <div class="form-group"><label for="contract-code">Código *:</label><input type="text" id="contract-code" value="${contract?.code || ''}" required></div>
@@ -174,33 +171,10 @@ class Contracts {
 
         modal.show({ title, body: form, onSave: () => this.saveContract(contract?.id) });
 
-        if (!contract) {
-            this.setupContractTypeSelector();
-        }
         if (contract && isSupplement) {
             const status = document.getElementById('contract-status');
             if (status) status.value = contract.status || 'activo';
         }
-    }
-
-    async setupContractTypeSelector() {
-        const typeSelect = document.getElementById('contract-type');
-        const parentGroup = document.getElementById('contract-parent-group');
-        const parentSelect = document.getElementById('contract-parent-id');
-        if (!typeSelect || !parentGroup || !parentSelect) return;
-
-        const contractsList = await db.getAll('contracts', 'companyId', this.currentCompany.id);
-        const availableParents = contractsList.filter(item => (item.contractType || 'contract') === 'contract');
-        parentSelect.innerHTML = `<option value="">Seleccionar contrato</option>${availableParents.map(item => `<option value="${item.id}">${item.code} - ${item.name}</option>`).join('')}`;
-
-        const toggleParent = () => {
-            const showParent = typeSelect.value === 'supplement';
-            parentGroup.style.display = showParent ? 'block' : 'none';
-            parentSelect.required = showParent;
-        };
-
-        typeSelect.addEventListener('change', toggleParent);
-        toggleParent();
     }
 
     async saveContract(id = null) {
@@ -209,8 +183,8 @@ class Contracts {
             return;
         }
 
-        const contractType = id ? null : (document.getElementById('contract-type')?.value || 'contract');
-        const parentContractId = id ? null : (document.getElementById('contract-parent-id')?.value || '');
+        const contractType = id ? null : 'contract';
+        const parentContractId = id ? null : '';
         const salaryInput = this.utils.parsePercentageInput(document.getElementById('contract-salary-percentage').value);
         const contract = {
             code: document.getElementById('contract-code').value.trim(),
@@ -241,11 +215,6 @@ class Contracts {
             this.showMessage('El valor del servicio debe ser mayor a 0', 'error');
             return;
         }
-        if (!id && contractType === 'supplement' && !parentContractId) {
-            this.showMessage('Selecciona el contrato base del suplemento', 'error');
-            return;
-        }
-
         try {
             if (id) {
                 const existingContract = await db.get('contracts', id);
@@ -263,7 +232,7 @@ class Contracts {
                 contract.contractType = contractType;
                 contract.parentContractId = parentContractId;
                 await db.add('contracts', contract);
-                this.showMessage(contractType === 'supplement' ? 'Suplemento creado exitosamente' : 'Contrato creado exitosamente', 'success');
+                this.showMessage('Contrato creado exitosamente', 'success');
             }
 
             modal.hide();
