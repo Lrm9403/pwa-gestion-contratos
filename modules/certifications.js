@@ -41,10 +41,12 @@ class Certifications {
             }];
 
             (contract.supplements || []).forEach((supplement, index) => {
+                const supplementCode = supplement.code || `SUP-${String(index + 1).padStart(2, '0')}`;
+                const supplementName = supplement.name ? ` · ${supplement.name}` : '';
                 scopes.push({
                     value: `supplement:${supplement.id}`,
-                    label: `SUP-${String(index + 1).padStart(2, '0')} · ${supplement.date || 's/f'}`,
-                    amount: this.utils.toNumber(supplement.amount)
+                    label: `${supplementCode}${supplementName} · ${supplement.date || 's/f'}`,
+                    amount: this.utils.toNumber(supplement.serviceValue ?? supplement.amount)
                 });
             });
 
@@ -112,7 +114,8 @@ class Certifications {
         }
         const supplement = (contract.supplements || []).find(item => `supplement:${item.id}` === scopeId);
         if (supplement) {
-            return { label: `Suplemento (${supplement.date || 's/f'})`, amount: this.utils.toNumber(supplement.amount) };
+            const label = supplement.name ? `${supplement.code || 'SUP'} · ${supplement.name}` : (supplement.code || 'Suplemento');
+            return { label: `${label} (${supplement.date || 's/f'})`, amount: this.utils.toNumber(supplement.serviceValue ?? supplement.amount) };
         }
         if (scopeId.startsWith('legacy-supplement:')) {
             const legacyId = scopeId.replace('legacy-supplement:', '');
