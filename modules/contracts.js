@@ -34,6 +34,10 @@ class Contracts {
         return type === 'supplement' ? 'Suplemento' : 'Contrato';
     }
 
+    getSupplementServiceValue(supplement) {
+        return this.utils.toNumber(supplement?.serviceValue ?? supplement?.amount);
+    }
+
     getContractScopeOptions(contract) {
         const options = [{
             id: `contract:${contract.id}`,
@@ -43,10 +47,12 @@ class Contracts {
         }];
         const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
         supplements.forEach((supplement, index) => {
+            const supplementCode = supplement.code || `SUP-${String(index + 1).padStart(2, '0')}`;
+            const supplementName = supplement.name ? ` · ${supplement.name}` : '';
             options.push({
                 id: `supplement:${supplement.id}`,
-                label: `${contract.code} · SUP-${String(index + 1).padStart(2, '0')} (${supplement.date || 's/f'})`,
-                amount: this.utils.toNumber(supplement.amount),
+                label: `${contract.code} · ${supplementCode}${supplementName} (${supplement.date || 's/f'})`,
+                amount: this.getSupplementServiceValue(supplement),
                 type: 'supplement',
                 supplement
             });
@@ -160,7 +166,7 @@ class Contracts {
             <div class="form-group"><label for="contract-code">Código *:</label><input type="text" id="contract-code" value="${contract?.code || ''}" required></div>
             <div class="form-group"><label for="contract-name">Nombre del contrato *:</label><input type="text" id="contract-name" value="${contract?.name || ''}" required></div>
             <div class="form-group"><label for="contract-client">Cliente *:</label><input type="text" id="contract-client" value="${contract?.client || ''}" required></div>
-            <div class="form-group"><label for="contract-service-value">Valor del servicio ($) *:</label><input type="number" id="contract-service-value" step="0.0000001" min="0.0000001" value="${contract?.serviceValue || ''}" required></div>
+            <div class="form-group"><label for="contract-service-value">Valor del servicio ($) *:</label><input type="number" id="contract-service-value" step="0.0000001" min="0.0000001" value="${contract?.serviceValueRaw ?? contract?.serviceValue ?? ''}" required></div>
             <div class="form-group"><label for="contract-salary-percentage">% de salario *:</label><input type="number" id="contract-salary-percentage" step="0.0000001" min="0" max="100" value="${contract?.salaryPercentageRaw ?? contract?.salaryPercentage ?? ''}" required></div>
             <div class="form-group"><label>% de impuestos de la empresa:</label><input type="text" value="${this.utils.formatPercentage(taxPercentage, taxPercentageRaw)}" disabled></div>
             <div class="form-group"><label for="contract-start-date">Fecha de inicio:</label><input type="date" id="contract-start-date" value="${contract?.startDate || ''}"></div>
@@ -186,11 +192,13 @@ class Contracts {
         const contractType = id ? null : 'contract';
         const parentContractId = id ? null : '';
         const salaryInput = this.utils.parsePercentageInput(document.getElementById('contract-salary-percentage').value);
+        const serviceValueRaw = String(document.getElementById('contract-service-value').value ?? '').trim().replace(',', '.');
         const contract = {
             code: document.getElementById('contract-code').value.trim(),
             name: document.getElementById('contract-name').value.trim(),
             client: document.getElementById('contract-client').value.trim(),
-            serviceValue: this.utils.toNumber(document.getElementById('contract-service-value').value),
+            serviceValue: this.utils.toNumber(serviceValueRaw),
+            serviceValueRaw,
             salaryPercentage: salaryInput.value,
             salaryPercentageRaw: salaryInput.raw,
             taxPercentage: this.getCompanyTaxPercentage(),
@@ -260,6 +268,8 @@ class Contracts {
         }
 
         const form = `
+            <div class="form-group"><label for="supplement-code">Código suplemento *:</label><input type="text" id="supplement-code" placeholder="SUP-001" required></div>
+            <div class="form-group"><label for="supplement-name">Nombre suplemento *:</label><input type="text" id="supplement-name" placeholder="Nombre del suplemento" required></div>
             <div class="form-group"><label for="supplement-amount">Monto suplemento ($) *:</label><input type="number" id="supplement-amount" step="0.0000001" min="0.0000001" required></div>
             <div class="form-group"><label for="supplement-date">Fecha *:</label><input type="date" id="supplement-date" value="${new Date().toISOString().split('T')[0]}" required></div>
             <div class="form-group"><label for="supplement-description">Descripción:</label><textarea id="supplement-description" rows="3"></textarea></div>
@@ -269,10 +279,13 @@ class Contracts {
     }
 
     async saveSupplement(contractId) {
-        const amount = this.utils.toNumber(document.getElementById('supplement-amount').value);
+        const code = document.getElementById('supplement-code').value.trim();
+        const name = document.getElementById('supplement-name').value.trim();
+        const serviceValueRaw = String(document.getElementById('supplement-amount').value ?? '').trim().replace(',', '.');
+        const amount = this.utils.toNumber(serviceValueRaw);
         const date = document.getElementById('supplement-date').value;
         const description = document.getElementById('supplement-description').value.trim();
-        if (amount <= 0 || !date) {
+        if (!code || !name || amount <= 0 || !date) {
             this.showMessage('Completa correctamente el suplemento', 'error');
             return;
         }
@@ -285,7 +298,17 @@ class Contracts {
             }
 
             const supplements = Array.isArray(contract.supplements) ? [...contract.supplements] : [];
-            supplements.push({ id: `sup_${Date.now()}`, amount, date, description });
+            supplements.push({
+                id: `sup_${Date.now()}`,
+                code,
+                name,
+                serviceValue: amount,
+                serviceValueRaw,
+                amount,
+                date,
+                description,
+                status: 'activo'
+            });
 
             await db.update('contracts', contractId, { ...contract, supplements, updatedAt: new Date().toISOString() });
             modal.hide();
