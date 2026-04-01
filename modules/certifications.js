@@ -62,6 +62,12 @@ class Certifications {
         });
     }
 
+    isScopeValidForContract(contractCatalog, contractId, scopeId) {
+        const contractEntry = contractCatalog.find(item => item.contract.id === contractId);
+        if (!contractEntry) return false;
+        return contractEntry.scopes.some(scope => scope.value === scopeId);
+    }
+
     async syncCertificationStatuses() {
         const { certificationsList, invoicesList, paymentsList } = await this.getCompanyContractsData();
         const paidInvoiceIds = new Set();
@@ -270,6 +276,13 @@ class Certifications {
             const contract = await db.get('contracts', contractId);
             if (!contract) {
                 this.showMessage('Contrato no encontrado', 'error');
+                return;
+            }
+            const companyContracts = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
+            const companyActiveContracts = companyContracts.filter(item => (item.status || 'activo') !== 'suspendido');
+            const contractCatalog = this.buildContractScopeCatalog(companyActiveContracts);
+            if (!this.isScopeValidForContract(contractCatalog, contractId, scopeId)) {
+                this.showMessage('El alcance seleccionado no corresponde al contrato', 'error');
                 return;
             }
 
