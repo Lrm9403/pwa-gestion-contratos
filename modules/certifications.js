@@ -30,6 +30,38 @@ class Certifications {
         return { contractsList, certificationsList, paymentsList, invoicesList };
     }
 
+    buildContractScopeCatalog(contractsList) {
+        const baseContracts = contractsList.filter(contract => (contract.contractType || 'contract') !== 'supplement');
+        const legacySupplements = contractsList.filter(contract => (contract.contractType || 'contract') === 'supplement' && contract.parentContractId);
+        return baseContracts.map(contract => {
+            const scopes = [{
+                value: `contract:${contract.id}`,
+                label: 'Contrato base',
+                amount: this.utils.toNumber(contract.serviceValue)
+            }];
+
+            (contract.supplements || []).forEach((supplement, index) => {
+                scopes.push({
+                    value: `supplement:${supplement.id}`,
+                    label: `SUP-${String(index + 1).padStart(2, '0')} · ${supplement.date || 's/f'}`,
+                    amount: this.utils.toNumber(supplement.amount)
+                });
+            });
+
+            legacySupplements
+                .filter(supplementContract => supplementContract.parentContractId === contract.id)
+                .forEach((supplementContract, index) => {
+                    scopes.push({
+                        value: `legacy-supplement:${supplementContract.id}`,
+                        label: `SUP-L${String(index + 1).padStart(2, '0')} · ${supplementContract.code || 'sin código'}`,
+                        amount: this.utils.toNumber(supplementContract.serviceValue)
+                    });
+                });
+
+            return { contract, scopes };
+        });
+    }
+
     async syncCertificationStatuses() {
         const { certificationsList, invoicesList, paymentsList } = await this.getCompanyContractsData();
         const paidInvoiceIds = new Set();
@@ -66,14 +98,24 @@ class Certifications {
             .reduce((sum, allocation) => sum + this.utils.toNumber(allocation.amount), 0);
     }
 
-    getContractScope(contract, scopeId) {
+    getContractScope(contractsList, contractId, scopeId) {
+        const contract = contractsList.find(item => item.id === contractId);
+        if (!contract) return { label: 'N/A', amount: 0 };
         if (!scopeId || scopeId === `contract:${contract.id}`) {
-            const baseLabel = (contract.contractType || 'contract') === 'supplement' ? 'Suplemento' : 'Contrato base';
-            return { label: baseLabel, amount: this.utils.toNumber(contract.serviceValue) };
+            return { label: 'Contrato base', amount: this.utils.toNumber(contract.serviceValue) };
         }
         const supplement = (contract.supplements || []).find(item => `supplement:${item.id}` === scopeId);
-        if (!supplement) return { label: 'Suplemento', amount: 0 };
-        return { label: `Suplemento (${supplement.date || 's/f'})`, amount: this.utils.toNumber(supplement.amount) };
+        if (supplement) {
+            return { label: `Suplemento (${supplement.date || 's/f'})`, amount: this.utils.toNumber(supplement.amount) };
+        }
+        if (scopeId.startsWith('legacy-supplement:')) {
+            const legacyId = scopeId.replace('legacy-supplement:', '');
+            const legacyContract = contractsList.find(item => item.id === legacyId);
+            if (legacyContract) {
+                return { label: `Suplemento (${legacyContract.code || 'legacy'})`, amount: this.utils.toNumber(legacyContract.serviceValue) };
+            }
+        }
+        return { label: 'Suplemento', amount: 0 };
     }
 
     async loadCertifications() {
@@ -88,9 +130,9 @@ class Certifications {
             const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
 
             const enrichedCerts = certificationsList.map(certification => {
-                const contract = contractsList.find(contractItem => contractItem.id === certification.contractId);
                 const scopeId = certification.scopeId || `contract:${certification.contractId}`;
-                const scope = contract ? this.getContractScope(contract, scopeId) : { label: 'N/A', amount: 0 };
+                const scope = this.getContractScope(contractsList, certification.contractId, scopeId);
+                const contract = contractsList.find(contractItem => contractItem.id === certification.contractId);
                 const sameScopeCerts = certificationsList
                     .filter(item => item.contractId === certification.contractId && (item.scopeId || `contract:${item.contractId}`) === scopeId)
                     .sort((a, b) => this.utils.comparePeriods(a, b));
@@ -170,27 +212,18 @@ class Certifications {
 
         const contractsList = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
         const activeContracts = contractsList.filter(contract => (contract.status || 'activo') !== 'suspendido');
-        if (activeContracts.length === 0) {
+        const contractCatalog = this.buildContractScopeCatalog(activeContracts);
+        if (contractCatalog.length === 0) {
             this.showMessage('No hay contratos para crear certificaciones', 'error');
             return;
         }
-
-        const scopeOptions = activeContracts.flatMap(contract => {
-            const baseLabel = (contract.contractType || 'contract') === 'supplement' ? 'Suplemento' : 'Contrato base';
-            const base = [{ value: `contract:${contract.id}`, contractId: contract.id, salary: contract.salaryPercentage, label: `${contract.code} - ${contract.name} (${baseLabel})` }];
-            const supplements = (contract.supplements || []).map((supp, index) => ({
-                value: `supplement:${supp.id}`,
-                contractId: contract.id,
-                salary: contract.salaryPercentage,
-                label: `${contract.code} - ${contract.name} (SUP-${String(index + 1).padStart(2, '0')} · ${supp.date || 's/f'})`
-            }));
-            return [...base, ...supplements];
-        });
-
-        const selectedScope = certification?.scopeId || `contract:${certification?.contractId || ''}`;
+        const selectedContractId = certification?.contractId || contractCatalog[0].contract.id;
+        const initialScope = certification?.scopeId || `contract:${selectedContractId}`;
+        const contractOptions = contractCatalog.map(item => `<option value="${item.contract.id}" ${item.contract.id === selectedContractId ? 'selected' : ''}>${item.contract.code} - ${item.contract.name}</option>`).join('');
 
         const form = `
-            <div class="form-group"><label for="cert-scope">Contrato/Suplemento *:</label><select id="cert-scope" required><option value="">Seleccionar</option>${scopeOptions.map(o => `<option value="${o.value}" data-contract-id="${o.contractId}" data-salary="${o.salary}" ${selectedScope === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}</select></div>
+            <div class="form-group"><label for="cert-contract">Contrato *:</label><select id="cert-contract" required><option value="">Seleccionar</option>${contractOptions}</select></div>
+            <div class="form-group"><label for="cert-scope">Alcance (base/suplemento) *:</label><select id="cert-scope" required><option value="">Seleccionar alcance</option></select></div>
             <div class="form-group"><label for="cert-month">Mes *:</label><select id="cert-month" required><option value="">Seleccionar mes</option>${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${certification?.month === index + 1 ? 'selected' : ''}>${['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'][index]}</option>`).join('')}</select></div>
             <div class="form-group"><label for="cert-year">Año *:</label><input type="number" id="cert-year" min="2020" max="2100" value="${certification?.year || new Date().getFullYear()}" required></div>
             <div class="form-group"><label for="cert-amount">Monto certificado ($) *:</label><input type="number" id="cert-amount" step="0.0000001" min="0.0000001" value="${certification?.amount || ''}" required></div>
@@ -199,12 +232,25 @@ class Certifications {
         `;
 
         modal.show({ title: certification ? 'Editar Certificación' : 'Nueva Certificación', body: form, onSave: () => this.saveCertification(certification?.id) });
+
+        const contractSelect = document.getElementById('cert-contract');
+        const scopeSelect = document.getElementById('cert-scope');
+        const renderScopes = (preferredScope = '') => {
+            const selectedCatalog = contractCatalog.find(item => item.contract.id === contractSelect.value);
+            const scopes = selectedCatalog?.scopes || [];
+            const defaultScope = scopes.find(scope => scope.value === preferredScope)?.value || scopes[0]?.value || '';
+            scopeSelect.innerHTML = `<option value="">Seleccionar alcance</option>${scopes.map(scope => `<option value="${scope.value}" ${defaultScope === scope.value ? 'selected' : ''}>${scope.label}</option>`).join('')}`;
+        };
+        contractSelect.addEventListener('change', () => {
+            renderScopes();
+        });
+        renderScopes(initialScope);
     }
 
     async saveCertification(id = null) {
+        const contractId = document.getElementById('cert-contract').value;
         const scopeSelect = document.getElementById('cert-scope');
         const scopeId = scopeSelect.value;
-        const contractId = scopeSelect.selectedOptions[0]?.dataset.contractId || '';
         const month = Number.parseInt(document.getElementById('cert-month').value, 10);
         const year = Number.parseInt(document.getElementById('cert-year').value, 10);
         const amount = this.utils.toNumber(document.getElementById('cert-amount').value);
