@@ -48,6 +48,12 @@ class Invoices {
         });
     }
 
+    isScopeValidForContract(contractCatalog, contractId, scopeId) {
+        const contractEntry = contractCatalog.find(item => item.contract.id === contractId);
+        if (!contractEntry) return false;
+        return contractEntry.scopes.some(scope => scope.value === scopeId);
+    }
+
     isFutureDate(rawDate) {
         if (!rawDate) return false;
         const selected = new Date(`${rawDate}T00:00:00`);
@@ -216,7 +222,7 @@ class Invoices {
             const availableCerts = certificationsList
                 .filter(cert => cert.contractId === selectedContractId)
                 .filter(cert => (cert.scopeId || `contract:${cert.contractId}`) === selectedScope)
-                .filter(cert => cert.id === invoice?.certificationId || !takenCertIds.has(cert.id))
+                .filter(cert => !takenCertIds.has(cert.id) || (invoice?.certificationId === cert.id && cert.contractId === selectedContractId))
                 .sort((a, b) => this.utils.comparePeriods(a, b));
 
             certificationSelect.innerHTML = '<option value="">Sin certificación específica</option>';
@@ -286,6 +292,13 @@ class Invoices {
         };
 
         try {
+            const companyContracts = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
+            const companyActiveContracts = companyContracts.filter(item => (item.status || 'activo') !== 'suspendido');
+            const contractCatalog = this.buildContractScopeCatalog(companyActiveContracts);
+            if (!this.isScopeValidForContract(contractCatalog, contractId, scopeId)) {
+                this.showMessage('El alcance seleccionado no corresponde al contrato', 'error');
+                return;
+            }
             if (certificationId) {
                 const certification = await db.get('certifications', certificationId);
                 const certificationScopeId = certification?.scopeId || `contract:${certification?.contractId || ''}`;
