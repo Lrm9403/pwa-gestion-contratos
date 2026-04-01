@@ -25,6 +25,29 @@ class Invoices {
         return 'parcial';
     }
 
+    buildContractScopeCatalog(contractsList) {
+        const baseContracts = contractsList.filter(contract => (contract.contractType || 'contract') !== 'supplement');
+        const legacySupplements = contractsList.filter(contract => (contract.contractType || 'contract') === 'supplement' && contract.parentContractId);
+        return baseContracts.map(contract => {
+            const scopes = [{ value: `contract:${contract.id}`, label: 'Contrato base' }];
+            (contract.supplements || []).forEach((supplement, index) => {
+                scopes.push({
+                    value: `supplement:${supplement.id}`,
+                    label: `SUP-${String(index + 1).padStart(2, '0')} · ${supplement.date || 's/f'}`
+                });
+            });
+            legacySupplements
+                .filter(supplementContract => supplementContract.parentContractId === contract.id)
+                .forEach((supplementContract, index) => {
+                    scopes.push({
+                        value: `legacy-supplement:${supplementContract.id}`,
+                        label: `SUP-L${String(index + 1).padStart(2, '0')} · ${supplementContract.code || 'sin código'}`
+                    });
+                });
+            return { contract, scopes };
+        });
+    }
+
     isFutureDate(rawDate) {
         if (!rawDate) return false;
         const selected = new Date(`${rawDate}T00:00:00`);
@@ -93,7 +116,9 @@ class Invoices {
                     contractName: contract?.name || 'Sin nombre',
                     contractClient: contract?.client || 'N/A',
                     certificationLabel: certification ? this.utils.getCertificationPeriodLabel(certification) : 'Sin certificación',
-                    scopeLabel: certification?.scopeId?.startsWith('supplement:') ? 'Suplemento' : ((contract?.contractType || 'contract') === 'supplement' ? 'Suplemento' : 'Contrato base'),
+                    scopeLabel: certification?.scopeId?.startsWith('supplement:') || certification?.scopeId?.startsWith('legacy-supplement:')
+                        ? 'Suplemento'
+                        : (invoice.scopeId?.startsWith('supplement:') || invoice.scopeId?.startsWith('legacy-supplement:') ? 'Suplemento' : 'Contrato base'),
                     paidAmount,
                     pendingAmount,
                     computedStatus: this.getInvoiceStatus(invoice, paidAmount)
@@ -147,17 +172,21 @@ class Invoices {
         ]);
 
         const activeContracts = contractsList.filter(contract => (contract.status || 'activo') !== 'suspendido');
-        if (activeContracts.length === 0) {
+        const contractCatalog = this.buildContractScopeCatalog(activeContracts);
+        if (contractCatalog.length === 0) {
             this.showMessage('No hay contratos para crear facturas', 'error');
             return;
         }
 
-        const contractOptions = activeContracts.map(contract => `<option value="${contract.id}" ${invoice?.contractId === contract.id ? 'selected' : ''}>${contract.code} - ${contract.name}</option>`).join('');
+        const selectedContractId = invoice?.contractId || contractCatalog[0].contract.id;
+        const selectedScopeId = invoice?.scopeId || `contract:${selectedContractId}`;
+        const contractOptions = contractCatalog.map(item => `<option value="${item.contract.id}" ${item.contract.id === selectedContractId ? 'selected' : ''}>${item.contract.code} - ${item.contract.name}</option>`).join('');
         const takenCertIds = new Set(invoicesList.filter(item => item.id !== invoice?.id && item.certificationId).map(item => item.certificationId));
 
         const form = `
             <div class="form-group"><label for="invoice-number">Número de factura *:</label><input type="text" id="invoice-number" value="${invoice?.number || this.getNextInvoiceNumber(invoicesList)}" required><small>Formato sugerido: F 01/${new Date().getFullYear().toString().slice(-2)} (editable).</small></div>
             <div class="form-group"><label for="invoice-contract">Contrato *:</label><select id="invoice-contract" required><option value="">Seleccionar contrato</option>${contractOptions}</select></div>
+            <div class="form-group"><label for="invoice-scope">Alcance (base/suplemento) *:</label><select id="invoice-scope" required><option value="">Seleccionar alcance</option></select></div>
             <div class="form-group"><label for="invoice-certification">Certificación relacionada:</label><select id="invoice-certification"><option value="">Sin certificación específica</option></select><small>Solo se muestran certificaciones del contrato/suplemento elegido y sin factura previa.</small></div>
             <div class="form-group"><label for="invoice-date">Fecha *:</label><input type="date" id="invoice-date" value="${invoice?.date || new Date().toISOString().split('T')[0]}" required></div>
             <div class="form-group"><label for="invoice-due-date">Fecha de vencimiento:</label><input type="date" id="invoice-due-date" value="${invoice?.dueDate || ''}"></div>
@@ -169,14 +198,24 @@ class Invoices {
         modal.show({ title: invoice ? 'Editar Factura' : 'Nueva Factura', body: form, onSave: () => this.saveInvoice(invoice?.id) });
 
         const contractSelect = document.getElementById('invoice-contract');
+        const scopeSelect = document.getElementById('invoice-scope');
         const certificationSelect = document.getElementById('invoice-certification');
         const amountInput = document.getElementById('invoice-amount');
         const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
 
+        const renderScopeOptions = (preferredScope = '') => {
+            const selectedContract = contractCatalog.find(item => item.contract.id === contractSelect.value);
+            const scopes = selectedContract?.scopes || [];
+            const defaultScope = scopes.find(scope => scope.value === preferredScope)?.value || scopes[0]?.value || '';
+            scopeSelect.innerHTML = `<option value="">Seleccionar alcance</option>${scopes.map(scope => `<option value="${scope.value}" ${scope.value === defaultScope ? 'selected' : ''}>${scope.label}</option>`).join('')}`;
+        };
+
         const renderCertificationOptions = () => {
             const selectedContractId = contractSelect.value;
+            const selectedScope = scopeSelect.value;
             const availableCerts = certificationsList
                 .filter(cert => cert.contractId === selectedContractId)
+                .filter(cert => (cert.scopeId || `contract:${cert.contractId}`) === selectedScope)
                 .filter(cert => cert.id === invoice?.certificationId || !takenCertIds.has(cert.id))
                 .sort((a, b) => this.utils.comparePeriods(a, b));
 
@@ -186,28 +225,33 @@ class Invoices {
                 option.value = cert.id;
                 option.dataset.contractId = cert.contractId;
                 option.dataset.amount = this.utils.calculateTotalWithTax(cert.amount, companyTax);
-                const selectedContract = activeContracts.find(item => item.id === cert.contractId);
-                const certScopeLabel = (cert.scopeId || '').startsWith('supplement:')
+                const certScopeLabel = (cert.scopeId || '').startsWith('supplement:') || (cert.scopeId || '').startsWith('legacy-supplement:')
                     ? 'Suplemento'
-                    : (((selectedContract?.contractType || 'contract') === 'supplement') ? 'Suplemento' : 'Contrato base');
+                    : 'Contrato base';
                 option.textContent = `${this.utils.getCertificationPeriodLabel(cert)} · ${certScopeLabel}`;
                 if (invoice?.certificationId === cert.id) option.selected = true;
                 certificationSelect.appendChild(option);
             });
         };
 
-        contractSelect.addEventListener('change', renderCertificationOptions);
+        contractSelect.addEventListener('change', () => {
+            renderScopeOptions();
+            renderCertificationOptions();
+        });
+        scopeSelect.addEventListener('change', renderCertificationOptions);
         certificationSelect.addEventListener('change', () => {
             const selectedOption = certificationSelect.selectedOptions[0];
             if (!selectedOption?.value) return;
             if (!amountInput.value) amountInput.value = String(selectedOption.dataset.amount || '');
         });
+        renderScopeOptions(selectedScopeId);
         renderCertificationOptions();
     }
 
     async saveInvoice(id = null) {
         const number = document.getElementById('invoice-number').value.trim();
         const contractId = document.getElementById('invoice-contract').value;
+        const scopeId = document.getElementById('invoice-scope').value;
         const certificationId = document.getElementById('invoice-certification').value || null;
         const date = document.getElementById('invoice-date').value;
         const dueDate = document.getElementById('invoice-due-date').value || '';
@@ -215,7 +259,7 @@ class Invoices {
         const manualStatus = document.getElementById('invoice-manual-status').value;
         const notes = document.getElementById('invoice-notes').value.trim();
 
-        if (!number || !contractId || !date || amount <= 0) {
+        if (!number || !contractId || !scopeId || !date || amount <= 0) {
             this.showMessage('Completa los campos requeridos de la factura', 'error');
             return;
         }
@@ -227,6 +271,7 @@ class Invoices {
         const invoice = {
             number,
             contractId,
+            scopeId,
             certificationId,
             date,
             dueDate,
@@ -241,6 +286,15 @@ class Invoices {
         };
 
         try {
+            if (certificationId) {
+                const certification = await db.get('certifications', certificationId);
+                const certificationScopeId = certification?.scopeId || `contract:${certification?.contractId || ''}`;
+                if (!certification || certification.contractId !== contractId || certificationScopeId !== scopeId) {
+                    this.showMessage('La certificación seleccionada no corresponde al contrato/al alcance elegido', 'error');
+                    return;
+                }
+            }
+
             const existingInvoices = await db.getAll('invoices', 'companyId', companies.currentCompany.id);
             const duplicate = existingInvoices.find(item => item.id !== id && item.number === number);
             if (duplicate) {
