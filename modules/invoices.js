@@ -31,9 +31,11 @@ class Invoices {
         return baseContracts.map(contract => {
             const scopes = [{ value: `contract:${contract.id}`, label: 'Contrato base' }];
             (contract.supplements || []).forEach((supplement, index) => {
+                const supplementCode = supplement.code || `SUP-${String(index + 1).padStart(2, '0')}`;
+                const supplementName = supplement.name ? ` · ${supplement.name}` : '';
                 scopes.push({
                     value: `supplement:${supplement.id}`,
-                    label: `SUP-${String(index + 1).padStart(2, '0')} · ${supplement.date || 's/f'}`
+                    label: `${supplementCode}${supplementName} · ${supplement.date || 's/f'}`
                 });
             });
             legacySupplements
