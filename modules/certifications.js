@@ -34,6 +34,9 @@ class Certifications {
         const baseContracts = contractsList.filter(contract => (contract.contractType || 'contract') !== 'supplement');
         const legacySupplements = contractsList.filter(contract => (contract.contractType || 'contract') === 'supplement' && contract.parentContractId);
         return baseContracts.map(contract => {
+            const linkedSupplementContractIds = new Set(
+                (contract.supplements || []).map(supplement => supplement.linkedContractId).filter(Boolean)
+            );
             const scopes = [{
                 value: `contract:${contract.id}`,
                 label: 'Contrato base',
@@ -51,7 +54,10 @@ class Certifications {
             });
 
             legacySupplements
-                .filter(supplementContract => supplementContract.parentContractId === contract.id)
+                .filter(supplementContract =>
+                    supplementContract.parentContractId === contract.id
+                    && !linkedSupplementContractIds.has(supplementContract.id)
+                )
                 .forEach((supplementContract, index) => {
                     scopes.push({
                         value: `legacy-supplement:${supplementContract.id}`,
