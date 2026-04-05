@@ -442,6 +442,19 @@ tbody tr:hover {
     background: var(--light-color);
 }
 
+tbody tr.supplement-row {
+    background: #f8faff;
+}
+
+tbody tr.supplement-row td {
+    border-bottom: 1px dashed #cfd8e6;
+}
+
+tbody tr.supplement-row td:first-child {
+    border-left: 4px solid #90a4d4;
+    font-weight: 600;
+}
+
 .status {
     display: inline-block;
     padding: 5px 10px;
