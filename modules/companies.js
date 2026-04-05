@@ -17,6 +17,17 @@ class Companies {
         });
 
         this.loadCurrentCompany();
+        this.loadCompaniesWhenReady();
+    }
+
+    async loadCompaniesWhenReady() {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+            if (auth?.currentUser) {
+                await this.loadCompanies();
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 150));
+        }
     }
 
     async loadCurrentCompany() {
