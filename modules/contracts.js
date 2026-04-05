@@ -38,6 +38,10 @@ class Contracts {
         return this.utils.toNumber(supplement?.serviceValue ?? supplement?.amount);
     }
 
+    getScopeStatus(scope, fallbackStatus = 'activo') {
+        return scope.pendingWithTax <= 0 ? 'finalizado' : (fallbackStatus === 'suspendido' ? 'suspendido' : 'activo');
+    }
+
     getContractScopeOptions(contract) {
         const options = [{
             id: `contract:${contract.id}`,
@@ -120,31 +124,100 @@ class Contracts {
             return;
         }
 
-        contracts.forEach(contract => {
-            const scopes = contract.scopes || [];
-            const totalPending = scopes.reduce((sum, scope) => sum + scope.pendingWithTax, 0);
-            const status = totalPending <= 0 ? 'finalizado' : ((contract.status === 'suspendido') ? 'suspendido' : 'activo');
-            const details = scopes.map(scope => `${scope.label}: Pendiente ${this.utils.formatCurrency(scope.pendingWithTax)}`).join('<br>');
-            const canAddSupplement = (contract.contractType || 'contract') === 'contract';
+        const contractsMap = new Map(contracts.map(contract => [contract.id, contract]));
+        const baseContracts = contracts.filter(contract => (contract.contractType || 'contract') === 'contract');
+        const orphanSupplements = contracts.filter(contract => (contract.contractType || 'contract') === 'supplement' && !contractsMap.has(contract.parentContractId));
 
+        const appendRow = (data) => {
             const row = document.createElement('tr');
+            row.className = data.rowClass || '';
             row.innerHTML = `
-                <td>${contract.code || 'N/A'}</td>
-                <td>${contract.name || 'Sin nombre'}</td>
-                <td>${this.getContractTypeLabel(contract.contractType)}</td>
-                <td>${contract.client || 'N/A'}</td>
-                <td>${this.utils.formatCurrency(this.utils.toNumber(contract.serviceValue))}</td>
-                <td>${this.utils.formatCurrency(scopes.reduce((sum, scope) => sum + scope.totalWithTax, 0))}</td>
-                <td>${this.utils.formatPercentage(this.utils.toNumber(contract.salaryPercentage), contract.salaryPercentageRaw)}</td>
-                <td>${this.utils.formatCurrency(totalPending)}<br><small>${details}</small></td>
-                <td><span class="status ${status}">${status}</span></td>
-                <td>
-                    <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')"><i class="fas fa-edit"></i></button>
-                    ${canAddSupplement ? `<button class="btn btn-sm btn-primary" onclick="contracts.showSupplementForm('${contract.id}')"><i class="fas fa-file-circle-plus"></i></button>` : ''}
-                    <button class="btn btn-sm btn-danger" onclick="contracts.deleteContract('${contract.id}')"><i class="fas fa-trash"></i></button>
-                </td>
+                <td>${data.code}</td>
+                <td>${data.name}</td>
+                <td>${data.type}</td>
+                <td>${data.client}</td>
+                <td>${data.serviceValue}</td>
+                <td>${data.totalWithTax}</td>
+                <td>${data.salaryPercentage}</td>
+                <td>${data.pending}</td>
+                <td><span class="status ${data.status}">${data.status}</span></td>
+                <td>${data.actions}</td>
             `;
             tbody.appendChild(row);
+        };
+
+        baseContracts.forEach(contract => {
+            const scopes = contract.scopes || [];
+            const totalPending = scopes.reduce((sum, scope) => sum + scope.pendingWithTax, 0);
+            const status = this.getScopeStatus({ pendingWithTax: totalPending }, contract.status);
+            const details = scopes.map(scope => `${scope.label}: Pendiente ${this.utils.formatCurrency(scope.pendingWithTax)}`).join('<br>');
+            const baseScope = scopes.find(scope => scope.id === `contract:${contract.id}`) || {
+                totalWithTax: this.utils.calculateTotalWithTax(contract.serviceValue, this.getCompanyTaxPercentage()),
+                pendingWithTax: totalPending
+            };
+            appendRow({
+                code: contract.code || 'N/A',
+                name: contract.name || 'Sin nombre',
+                type: 'Contrato base',
+                client: contract.client || 'N/A',
+                serviceValue: this.utils.formatCurrency(this.utils.toNumber(contract.serviceValue)),
+                totalWithTax: this.utils.formatCurrency(baseScope.totalWithTax),
+                salaryPercentage: this.utils.formatPercentage(this.utils.toNumber(contract.salaryPercentage), contract.salaryPercentageRaw),
+                pending: `${this.utils.formatCurrency(baseScope.pendingWithTax)}<br><small>${details}</small>`,
+                status,
+                actions: `
+                    <button class="btn btn-sm btn-success" onclick="contracts.editContract('${contract.id}')"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm btn-primary" onclick="contracts.showSupplementForm('${contract.id}')"><i class="fas fa-file-circle-plus"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="contracts.deleteContract('${contract.id}')"><i class="fas fa-trash"></i></button>
+                `
+            });
+
+            const supplements = Array.isArray(contract.supplements) ? contract.supplements : [];
+            supplements.forEach((supplement, index) => {
+                const supplementScope = scopes.find(scope => scope.id === `supplement:${supplement.id}`) || {
+                    totalWithTax: this.utils.calculateTotalWithTax(this.getSupplementServiceValue(supplement), this.getCompanyTaxPercentage()),
+                    pendingWithTax: this.utils.calculateTotalWithTax(this.getSupplementServiceValue(supplement), this.getCompanyTaxPercentage())
+                };
+                const linkedSupplementContract = contractsMap.get(supplement.linkedContractId);
+                const supplementStatus = this.getScopeStatus(supplementScope, linkedSupplementContract?.status || 'activo');
+                appendRow({
+                    rowClass: 'supplement-row',
+                    code: supplement.code || `SUP-${String(index + 1).padStart(2, '0')}`,
+                    name: supplement.name || `Suplemento ${index + 1}`,
+                    type: 'Suplemento',
+                    client: contract.client || 'N/A',
+                    serviceValue: this.utils.formatCurrency(this.getSupplementServiceValue(supplement)),
+                    totalWithTax: this.utils.formatCurrency(supplementScope.totalWithTax),
+                    salaryPercentage: this.utils.formatPercentage(this.utils.toNumber(linkedSupplementContract?.salaryPercentage ?? contract.salaryPercentage), linkedSupplementContract?.salaryPercentageRaw ?? contract.salaryPercentageRaw),
+                    pending: `${this.utils.formatCurrency(supplementScope.pendingWithTax)}<br><small>Base: ${contract.code} · Fecha: ${supplement.date || 's/f'}</small>`,
+                    status: supplementStatus,
+                    actions: linkedSupplementContract
+                        ? `
+                            <button class="btn btn-sm btn-success" onclick="contracts.editContract('${linkedSupplementContract.id}')"><i class="fas fa-edit"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="contracts.deleteContract('${linkedSupplementContract.id}')"><i class="fas fa-trash"></i></button>
+                        `
+                        : '<small>Sin vínculo</small>'
+                });
+            });
+        });
+
+        orphanSupplements.forEach(supplementContract => {
+            appendRow({
+                rowClass: 'supplement-row',
+                code: supplementContract.code || 'N/A',
+                name: supplementContract.name || 'Suplemento',
+                type: 'Suplemento',
+                client: supplementContract.client || 'N/A',
+                serviceValue: this.utils.formatCurrency(this.utils.toNumber(supplementContract.serviceValue)),
+                totalWithTax: this.utils.formatCurrency(this.utils.calculateTotalWithTax(supplementContract.serviceValue, this.getCompanyTaxPercentage())),
+                salaryPercentage: this.utils.formatPercentage(this.utils.toNumber(supplementContract.salaryPercentage), supplementContract.salaryPercentageRaw),
+                pending: '<small>Suplemento huérfano (sin contrato base)</small>',
+                status: supplementContract.status || 'activo',
+                actions: `
+                    <button class="btn btn-sm btn-success" onclick="contracts.editContract('${supplementContract.id}')"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="contracts.deleteContract('${supplementContract.id}')"><i class="fas fa-trash"></i></button>
+                `
+            });
         });
     }
 
@@ -235,6 +308,29 @@ class Contracts {
                 contract.contractType = existingContract.contractType || 'contract';
                 contract.parentContractId = existingContract.parentContractId || '';
                 await db.update('contracts', id, contract);
+
+                if (contract.contractType === 'supplement' && contract.parentContractId) {
+                    const parentContract = await db.get('contracts', contract.parentContractId);
+                    if (parentContract) {
+                        const parentSupplements = Array.isArray(parentContract.supplements) ? [...parentContract.supplements] : [];
+                        const updatedSupplements = parentSupplements.map(supplement => (
+                            supplement.linkedContractId === id
+                                ? {
+                                    ...supplement,
+                                    code: contract.code,
+                                    name: contract.name,
+                                    serviceValue: contract.serviceValue,
+                                    serviceValueRaw: contract.serviceValueRaw,
+                                    amount: contract.serviceValue,
+                                    date: contract.startDate || supplement.date,
+                                    description: contract.description,
+                                    status: contract.status
+                                }
+                                : supplement
+                        ));
+                        await db.update('contracts', parentContract.id, { ...parentContract, supplements: updatedSupplements, updatedAt: new Date().toISOString() });
+                    }
+                }
                 this.showMessage('Contrato actualizado exitosamente', 'success');
             } else {
                 contract.contractType = contractType;
@@ -297,9 +393,33 @@ class Contracts {
                 return;
             }
 
+            const supplementContract = {
+                code,
+                name,
+                client: contract.client,
+                serviceValue: amount,
+                serviceValueRaw,
+                salaryPercentage: contract.salaryPercentage,
+                salaryPercentageRaw: contract.salaryPercentageRaw,
+                taxPercentage: contract.taxPercentage,
+                taxPercentageRaw: contract.taxPercentageRaw,
+                startDate: date,
+                endDate: contract.endDate || '',
+                status: 'activo',
+                description,
+                companyId: contract.companyId,
+                userId: auth.currentUser.id,
+                contractType: 'supplement',
+                parentContractId: contractId,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            const linkedContractId = await db.add('contracts', supplementContract);
+
             const supplements = Array.isArray(contract.supplements) ? [...contract.supplements] : [];
             supplements.push({
                 id: `sup_${Date.now()}`,
+                linkedContractId,
                 code,
                 name,
                 serviceValue: amount,
@@ -326,14 +446,26 @@ class Contracts {
     async deleteContract(id) {
         if (!confirm('¿Estás seguro de eliminar este contrato? También se eliminarán certificaciones, facturas y pagos asociados.')) return;
         try {
-            const [certificationsList, invoicesList, paymentsList] = await Promise.all([
+            const [certificationsList, invoicesList, paymentsList, childSupplements] = await Promise.all([
                 db.getAll('certifications', 'contractId', id),
                 db.getAll('invoices', 'contractId', id),
-                db.getAll('payments', 'contractId', id)
+                db.getAll('payments', 'contractId', id),
+                db.getAll('contracts', 'parentContractId', id)
             ]);
             for (const cert of certificationsList) await db.delete('certifications', cert.id);
             for (const invoice of invoicesList) await db.delete('invoices', invoice.id);
             for (const payment of paymentsList) await db.delete('payments', payment.id);
+            for (const supplementContract of childSupplements) await db.delete('contracts', supplementContract.id);
+
+            const contractToDelete = await db.get('contracts', id);
+            if (contractToDelete?.contractType === 'supplement' && contractToDelete.parentContractId) {
+                const parentContract = await db.get('contracts', contractToDelete.parentContractId);
+                if (parentContract) {
+                    const parentSupplements = Array.isArray(parentContract.supplements) ? parentContract.supplements : [];
+                    const filteredSupplements = parentSupplements.filter(supplement => supplement.linkedContractId !== id);
+                    await db.update('contracts', parentContract.id, { ...parentContract, supplements: filteredSupplements, updatedAt: new Date().toISOString() });
+                }
+            }
             await db.delete('contracts', id);
 
             this.showMessage('Contrato eliminado exitosamente', 'success');
@@ -356,7 +488,7 @@ class Contracts {
     }
 
     updateDashboard(contracts = []) {
-        const activeContracts = contracts.filter(contract => (contract.status || 'activo') === 'activo').length;
+        const activeContracts = contracts.filter(contract => (contract.contractType || 'contract') === 'contract' && (contract.status || 'activo') === 'activo').length;
         const activeContractsElement = document.getElementById('active-contracts');
         if (activeContractsElement) activeContractsElement.textContent = activeContracts;
     }
