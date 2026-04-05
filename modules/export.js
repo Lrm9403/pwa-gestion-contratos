@@ -1,12 +1,22 @@
 class ExportManager {
     constructor() {
-        this.utils = window.contractAppUtils;
+        this.utils = null;
+        this.listenersBound = false;
         this.init();
     }
 
     init() {
+        if (this.listenersBound) return;
         document.getElementById('export-excel')?.addEventListener('click', () => this.exportToExcel());
         document.getElementById('export-pdf')?.addEventListener('click', () => this.exportToPDF());
+        this.listenersBound = true;
+    }
+
+    ensureUtils() {
+        if (!this.utils && window.contractAppUtils) {
+            this.utils = window.contractAppUtils;
+        }
+        return this.utils;
     }
 
     getSalaryPaidMap(paymentsList) {
@@ -54,6 +64,10 @@ class ExportManager {
     }
 
     async exportToExcel() {
+        if (!this.ensureUtils()) {
+            auth.showMessage('No se pudo inicializar utilidades de exportación', 'error');
+            return;
+        }
         if (!window.XLSX) {
             auth.showMessage('No se pudo cargar la librería XLSX para exportar a Excel', 'error');
             return;
@@ -194,6 +208,10 @@ class ExportManager {
     }
 
     async exportToPDF() {
+        if (!this.ensureUtils()) {
+            auth.showMessage('No se pudo inicializar utilidades de exportación', 'error');
+            return;
+        }
         if (!window.jspdf || !window.jspdf.jsPDF) {
             auth.showMessage('No se pudo cargar la librería jsPDF para exportar PDF', 'error');
             return;
