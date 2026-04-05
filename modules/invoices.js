@@ -29,6 +29,9 @@ class Invoices {
         const baseContracts = contractsList.filter(contract => (contract.contractType || 'contract') !== 'supplement');
         const legacySupplements = contractsList.filter(contract => (contract.contractType || 'contract') === 'supplement' && contract.parentContractId);
         return baseContracts.map(contract => {
+            const linkedSupplementContractIds = new Set(
+                (contract.supplements || []).map(supplement => supplement.linkedContractId).filter(Boolean)
+            );
             const scopes = [{ value: `contract:${contract.id}`, label: 'Contrato base' }];
             (contract.supplements || []).forEach((supplement, index) => {
                 const supplementCode = supplement.code || `SUP-${String(index + 1).padStart(2, '0')}`;
@@ -39,7 +42,10 @@ class Invoices {
                 });
             });
             legacySupplements
-                .filter(supplementContract => supplementContract.parentContractId === contract.id)
+                .filter(supplementContract =>
+                    supplementContract.parentContractId === contract.id
+                    && !linkedSupplementContractIds.has(supplementContract.id)
+                )
                 .forEach((supplementContract, index) => {
                     scopes.push({
                         value: `legacy-supplement:${supplementContract.id}`,
