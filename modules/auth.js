@@ -211,6 +211,7 @@ class Auth {
     }
 
     showRegister() {
+        document.getElementById('app-screen').classList.remove('active');
         document.getElementById('login-screen').classList.remove('active');
         document.getElementById('register-screen').classList.add('active');
         
@@ -225,6 +226,7 @@ class Auth {
     }
 
     showLogin() {
+        document.getElementById('app-screen').classList.remove('active');
         document.getElementById('register-screen').classList.remove('active');
         document.getElementById('login-screen').classList.add('active');
         
