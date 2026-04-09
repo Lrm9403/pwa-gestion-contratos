@@ -64,6 +64,17 @@ window.contractAppUtils = {
     }
 };
 
+async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+
+    try {
+        await navigator.serviceWorker.register('./sw.js');
+        console.log('Service Worker registrado');
+    } catch (error) {
+        console.error('No se pudo registrar el Service Worker:', error);
+    }
+}
+
 // Inicialización de la aplicación
 class ContractManagerApp {
     constructor() {
@@ -381,6 +392,8 @@ let modal;
 let dashboard;
 
 document.addEventListener('DOMContentLoaded', async () => {
+    await registerServiceWorker();
+
     modal = new ModalManager();
     dashboard = new DashboardManager();
     app = new ContractManagerApp();
