@@ -11,8 +11,13 @@ class Invoices {
 
     getInvoicePaidAmount(invoice, paymentsList) {
         return paymentsList
-            .filter(payment => payment.purpose === 'invoice')
-            .flatMap(payment => payment.allocations || [])
+            .filter(payment => payment.purpose === 'invoice' || (!payment.purpose && payment.invoiceId))
+            .flatMap(payment => {
+                if (Array.isArray(payment.allocations) && payment.allocations.length > 0) {
+                    return payment.allocations;
+                }
+                return [{ invoiceId: payment.invoiceId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+            })
             .filter(allocation => allocation.invoiceId === invoice.id)
             .reduce((sum, allocation) => sum + this.utils.toNumber(allocation.amount), 0);
     }
@@ -89,9 +94,17 @@ class Invoices {
         ]);
 
         const paidMap = new Map();
-        paymentsList.filter(p => p.purpose === 'invoice').forEach(payment => {
-            (payment.allocations || []).forEach(a => paidMap.set(a.invoiceId, (paidMap.get(a.invoiceId) || 0) + this.utils.toNumber(a.amount)));
-        });
+        paymentsList
+            .filter(p => p.purpose === 'invoice' || (!p.purpose && p.invoiceId))
+            .forEach(payment => {
+                const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                    ? payment.allocations
+                    : [{ invoiceId: payment.invoiceId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+                allocations.forEach(a => {
+                    if (!a.invoiceId) return;
+                    paidMap.set(a.invoiceId, (paidMap.get(a.invoiceId) || 0) + this.utils.toNumber(a.amount));
+                });
+            });
 
         for (const cert of certificationsList) {
             const certInvoices = invoicesList.filter(inv => inv.certificationId === cert.id);
@@ -179,14 +192,40 @@ class Invoices {
             return;
         }
 
-        const [contractsList, certificationsList, invoicesList] = await Promise.all([
+        const [contractsList, certificationsList, invoicesList, paymentsList] = await Promise.all([
             db.getAll('contracts', 'companyId', companies.currentCompany.id),
             db.getAll('certifications', 'companyId', companies.currentCompany.id),
-            db.getAll('invoices', 'companyId', companies.currentCompany.id)
+            db.getAll('invoices', 'companyId', companies.currentCompany.id),
+            db.getAll('payments', 'companyId', companies.currentCompany.id)
         ]);
 
-        const activeContracts = contractsList.filter(contract => (contract.status || 'activo') !== 'suspendido');
-        const contractCatalog = this.buildContractScopeCatalog(activeContracts);
+        const activeContracts = contractsList.filter(contract => (contract.status || 'activo') === 'activo');
+        const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
+        const invoicePaidMap = this.getInvoicePaidMap(paymentsList);
+        const selectedInvoiceScope = invoice?.scopeId || '';
+        const contractCatalog = this.buildContractScopeCatalog(activeContracts)
+            .map(item => {
+                const scopes = item.scopes.filter(scope => {
+                    const totalScope = scope.value.startsWith('contract:')
+                        ? this.utils.toNumber(item.contract.serviceValue)
+                        : (() => {
+                            const supplement = (item.contract.supplements || []).find(s => `supplement:${s.id}` === scope.value);
+                            if (supplement) return this.utils.toNumber(supplement.serviceValue ?? supplement.amount);
+                            return 0;
+                        })();
+                    const totalWithTax = this.utils.calculateTotalWithTax(totalScope, companyTax);
+                    const collectedInScope = invoicesList
+                        .filter(inv => inv.id !== invoice?.id && inv.contractId === item.contract.id && (inv.scopeId || `contract:${inv.contractId}`) === scope.value)
+                        .reduce((sum, inv) => {
+                            if ((inv.manualStatus || inv.status) === 'pagado') return sum + this.utils.toNumber(inv.amount);
+                            return sum + Math.min(this.utils.toNumber(inv.amount), invoicePaidMap.get(inv.id) || 0);
+                        }, 0);
+                    const pending = this.utils.roundMoney(Math.max(0, totalWithTax - collectedInScope));
+                    return pending > 0 || scope.value === selectedInvoiceScope;
+                });
+                return { ...item, scopes };
+            })
+            .filter(item => item.scopes.length > 0);
         if (contractCatalog.length === 0) {
             this.showMessage('No hay contratos para crear facturas', 'error');
             return;
@@ -204,7 +243,7 @@ class Invoices {
             <div class="form-group"><label for="invoice-certification">Certificación relacionada:</label><select id="invoice-certification"><option value="">Sin certificación específica</option></select><small>Solo se muestran certificaciones del contrato/suplemento elegido y sin factura previa.</small></div>
             <div class="form-group"><label for="invoice-date">Fecha *:</label><input type="date" id="invoice-date" value="${invoice?.date || new Date().toISOString().split('T')[0]}" required></div>
             <div class="form-group"><label for="invoice-due-date">Fecha de vencimiento:</label><input type="date" id="invoice-due-date" value="${invoice?.dueDate || ''}"></div>
-            <div class="form-group"><label for="invoice-amount">Monto de factura ($) *:</label><input type="number" id="invoice-amount" step="0.0000001" min="0.0000001" value="${invoice?.amount || ''}" required></div>
+            <div class="form-group"><label for="invoice-amount">Monto de factura ($) *:</label><input type="number" id="invoice-amount" step="0.01" min="0.01" value="${invoice?.amount || ''}" required></div>
             <div class="form-group"><label for="invoice-manual-status">¿Factura pagada al registrar? *:</label><select id="invoice-manual-status"><option value="por_pagar" ${(invoice?.manualStatus || 'por_pagar') === 'por_pagar' ? 'selected' : ''}>No, por pagar</option><option value="pagado" ${invoice?.manualStatus === 'pagado' ? 'selected' : ''}>Sí, pagada</option></select></div>
             <div class="form-group"><label for="invoice-notes">Notas:</label><textarea id="invoice-notes" rows="3">${invoice?.notes || ''}</textarea></div>
         `;
@@ -215,8 +254,6 @@ class Invoices {
         const scopeSelect = document.getElementById('invoice-scope');
         const certificationSelect = document.getElementById('invoice-certification');
         const amountInput = document.getElementById('invoice-amount');
-        const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
-
         const renderScopeOptions = (preferredScope = '') => {
             const selectedContract = contractCatalog.find(item => item.contract.id === contractSelect.value);
             const scopes = selectedContract?.scopes || [];
@@ -301,7 +338,7 @@ class Invoices {
 
         try {
             const companyContracts = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
-            const companyActiveContracts = companyContracts.filter(item => (item.status || 'activo') !== 'suspendido');
+            const companyActiveContracts = companyContracts.filter(item => (item.status || 'activo') === 'activo' || item.id === contractId);
             const contractCatalog = this.buildContractScopeCatalog(companyActiveContracts);
             if (!this.isScopeValidForContract(contractCatalog, contractId, scopeId)) {
                 this.showMessage('El alcance seleccionado no corresponde al contrato', 'error');
