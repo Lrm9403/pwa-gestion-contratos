@@ -1,387 +1,417 @@
-class Auth {
+window.contractAppUtils = {
+    toNumber(value) {
+        const number = Number.parseFloat(value);
+        return Number.isFinite(number) ? number : 0;
+    },
+
+    normalizeDecimal(value, decimals = 8) {
+        const num = this.toNumber(value);
+        if (!Number.isFinite(num)) return 0;
+        return Number.parseFloat(num.toFixed(decimals));
+    },
+
+    roundMoney(value) {
+        return Number.parseFloat(this.toNumber(value).toFixed(2));
+    },
+
+    parsePercentageInput(rawValue) {
+        const raw = String(rawValue ?? '').trim().replace(',', '.');
+        return {
+            raw: raw === '' ? '0' : raw,
+            value: this.toNumber(raw)
+        };
+    },
+
+    formatPercentage(value, raw = null) {
+        if (raw !== null && raw !== undefined && String(raw).trim() !== '') {
+            return `${String(raw).trim()}%`;
+        }
+        return `${this.normalizeDecimal(value, 2).toFixed(2)}%`;
+    },
+
+    formatCurrency(value) {
+        const number = this.roundMoney(value);
+        return `$${number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    },
+
+    getCompanyTaxPercentage(company) {
+        if (!company) return 0;
+        if (company.taxPercentageRaw !== undefined && company.taxPercentageRaw !== null && String(company.taxPercentageRaw).trim() !== '') {
+            return this.toNumber(String(company.taxPercentageRaw).replace(',', '.'));
+        }
+        return this.toNumber(company.taxPercentage ?? 0);
+    },
+
+    calculateTaxAmount(baseAmount, taxPercentage) {
+        return this.toNumber(baseAmount) * (this.toNumber(taxPercentage) / 100);
+    },
+
+    calculateTotalWithTax(baseAmount, taxPercentage) {
+        return this.toNumber(baseAmount) + this.calculateTaxAmount(baseAmount, taxPercentage);
+    },
+
+    calculateSalaryAmount(baseAmount, salaryPercentage) {
+        return this.toNumber(baseAmount) * (this.toNumber(salaryPercentage) / 100);
+    },
+
+    getCertificationPeriodLabel(certification) {
+        return `${String(certification.month).padStart(2, '0')}/${certification.year}`;
+    },
+
+    comparePeriods(a, b) {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.month - b.month;
+    }
+};
+
+async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+
+    try {
+        await navigator.serviceWorker.register('./sw.js');
+        console.log('Service Worker registrado');
+    } catch (error) {
+        console.error('No se pudo registrar el Service Worker:', error);
+    }
+}
+
+// Inicialización de la aplicación
+class ContractManagerApp {
     constructor() {
-        this.currentUser = null;
         this.init();
     }
 
-    init() {
-        // Verificar si hay usuario guardado
-        const savedUser = localStorage.getItem('currentUser');
-        if (savedUser) {
-            try {
-                this.currentUser = JSON.parse(savedUser);
-                this.updateUI();
-                this.showApp();
-                window.supabaseSync?.syncUserData?.(this.currentUser.id);
-            } catch (error) {
-                console.error('Error al parsear usuario guardado:', error);
-                localStorage.removeItem('currentUser');
-            }
-        }
-        
-        // Configurar event listeners
-        this.setupEventListeners();
-    }
-
-    setupEventListeners() {
-        document.getElementById('login-btn')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.login();
-        });
-        
-        document.getElementById('register-btn')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.register();
-        });
-        
-        document.getElementById('show-register')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.showRegister();
-        });
-        
-        document.getElementById('show-login')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.showLogin();
-        });
-        
-        document.getElementById('logout-btn')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.logout();
-        });
-        
-        // Permitir Enter en formularios
-        document.getElementById('login-password')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.login();
-            }
-        });
-        
-        document.getElementById('register-confirm')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.register();
-            }
-        });
-    }
-
-    async login() {
-        const email = document.getElementById('login-email').value.trim();
-        const password = document.getElementById('login-password').value;
-        
-        if (!email || !password) {
-            this.showMessage('Por favor completa todos los campos', 'error');
-            return;
-        }
-        
-        this.showLoading(true);
-        
+    async init() {
         try {
-            // Esperar a que la base de datos esté lista
-            await db.ready();
-            
-            let user = await db.getUserByEmail(email);
+            this.setupNavigation();
+            this.setupModal();
+            this.setupConnectionManager();
+            this.setupForms();
 
-            if (!user && window.supabaseSync?.canSync?.()) {
-                const remoteUser = await window.supabaseSync.fetchUserByEmail(email);
-                if (remoteUser) {
-                    await db.putWithId('users', remoteUser);
-                    user = remoteUser;
+            await db.ready();
+            console.log('Aplicación inicializada correctamente');
+        } catch (error) {
+            console.error('Error al inicializar la aplicación:', error);
+
+            if (error.name === 'InvalidStateError' || error.name === 'AbortError') {
+                console.log('Intentando limpiar base de datos...');
+                try {
+                    await db.clearDatabase();
+                    console.log('Base de datos limpiada, recargando...');
+                    setTimeout(() => location.reload(), 1000);
+                } catch (clearError) {
+                    console.error('Error al limpiar base de datos:', clearError);
                 }
             }
-            
-            if (!user || user.password !== this.hashPassword(password)) {
-                this.showMessage('Email o contraseña incorrectos', 'error');
-                return;
-            }
-            
-            this.currentUser = {
-                ...user,
-                lastLogin: new Date().toISOString()
-            };
-            
-            localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
-            
-            // Actualizar último login
-            await db.update('users', user.id, {
-                ...user,
-                lastLogin: new Date().toISOString()
+
+            this.showMessage('Error al inicializar la aplicación. Recarga la página.', 'error');
+        }
+    }
+
+    setupNavigation() {
+        const menuItems = document.querySelectorAll('.menu-item');
+        menuItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                const section = e.currentTarget.dataset.section;
+                this.showSection(section);
+                menuItems.forEach(i => i.classList.remove('active'));
+                e.currentTarget.classList.add('active');
             });
-            
-            this.showMessage('¡Bienvenido!', 'success');
-            this.showApp();
-            this.updateUI();
-            
-            // Registrar actividad
-            await db.addActivity({
-                userId: user.id,
-                companyId: null,
-                type: 'login',
-                description: 'Usuario inició sesión'
-            });
-            
-            // Cargar empresas del usuario
+        });
+
+        document.getElementById('menu-toggle')?.addEventListener('click', () => {
+            document.querySelector('.sidebar')?.classList.toggle('active');
+        });
+
+        document.getElementById('company-select')?.addEventListener('change', (e) => {
             if (window.companies) {
-                await companies.loadCompanies();
+                companies.selectCompany(e.target.value);
             }
+        });
+    }
 
-            await window.supabaseSync?.syncUserData?.(user.id);
-            
-        } catch (error) {
-            console.error('Error al iniciar sesión:', error);
-            this.showMessage('Error al iniciar sesión. Intenta de nuevo.', 'error');
-        } finally {
-            this.showLoading(false);
+    showSection(sectionId) {
+        const sections = document.querySelectorAll('.content-section');
+        sections.forEach(section => section.classList.remove('active'));
+
+        const section = document.getElementById(`${sectionId}-section`);
+        if (section) {
+            section.classList.add('active');
+        }
+
+        if (!window.auth?.currentUser || sectionId === 'companies') return;
+
+        switch (sectionId) {
+            case 'dashboard':
+                dashboard.loadDashboardData();
+                break;
+            case 'contracts':
+                contracts.loadContracts();
+                break;
+            case 'certifications':
+                certifications.loadCertifications();
+                break;
+            case 'invoices':
+                invoices.loadInvoices();
+                break;
+            case 'salary':
+                salary.updateSalarySummary();
+                break;
+            case 'payments':
+                payments.loadPayments();
+                break;
+            case 'tools':
+                exportManager?.init?.();
+                break;
         }
     }
 
-    async register() {
-        const name = document.getElementById('register-name').value.trim();
-        const email = document.getElementById('register-email').value.trim();
-        const password = document.getElementById('register-password').value;
-        const confirm = document.getElementById('register-confirm').value;
-        
-        if (!name || !email || !password || !confirm) {
-            this.showMessage('Por favor completa todos los campos', 'error');
-            return;
-        }
-        
-        if (password !== confirm) {
-            this.showMessage('Las contraseñas no coinciden', 'error');
-            return;
-        }
-        
-        if (password.length < 6) {
-            this.showMessage('La contraseña debe tener al menos 6 caracteres', 'error');
-            return;
-        }
-        
-        if (!this.validateEmail(email)) {
-            this.showMessage('Email inválido', 'error');
-            return;
-        }
-        
-        this.showLoading(true);
-        
-        try {
-            await db.ready();
-            
-            const existingUser = await db.getUserByEmail(email);
-            if (existingUser) {
-                this.showMessage('Este email ya está registrado', 'error');
-                return;
+    setupModal() {
+        const modalElement = document.getElementById('modal');
+        const closeButton = document.querySelector('.close');
+        const cancelButton = document.getElementById('modal-cancel');
+        const saveButton = document.getElementById('modal-save');
+
+        closeButton?.addEventListener('click', () => modal.hide());
+        cancelButton?.addEventListener('click', () => modal.hide());
+        saveButton?.addEventListener('click', () => modal.save());
+
+        window.addEventListener('click', (event) => {
+            if (event.target === modalElement) {
+                modal.hide();
             }
-            
-            const user = {
-                name,
-                email,
-                password: this.hashPassword(password),
-                createdAt: new Date().toISOString(),
-                lastLogin: new Date().toISOString()
-            };
-            
-            const userId = await db.add('users', user);
-            user.id = userId;
-            
-            this.showMessage('¡Cuenta creada exitosamente!', 'success');
-            
-            // Iniciar sesión automáticamente
-            this.currentUser = user;
-            localStorage.setItem('currentUser', JSON.stringify(user));
-            this.showApp();
-            this.updateUI();
-            
-            // Registrar actividad
-            await db.addActivity({
-                userId: userId,
-                companyId: null,
-                type: 'register',
-                description: 'Nuevo usuario registrado'
-            });
+        });
+    }
 
-            await window.supabaseSync?.syncUserData?.(userId);
-            
-        } catch (error) {
-            console.error('Error al crear la cuenta:', error);
-            this.showMessage('Error al crear la cuenta. Intenta de nuevo.', 'error');
-        } finally {
-            this.showLoading(false);
+    setupConnectionManager() {
+        window.addEventListener('online', async () => {
+            this.updateConnectionStatus(true);
+            if (window.auth?.currentUser?.id) {
+                await window.supabaseSync?.syncUserData?.(window.auth.currentUser.id);
+            }
+        });
+        window.addEventListener('offline', () => this.updateConnectionStatus(false));
+
+        this.updateConnectionStatus(navigator.onLine);
+    }
+
+    updateConnectionStatus(isOnline) {
+        const statusElement = document.getElementById('connection-status');
+        const iconElement = document.getElementById('connection-icon');
+
+        if (!statusElement || !iconElement) return;
+
+        if (isOnline) {
+            statusElement.textContent = 'En línea';
+            iconElement.className = 'fas fa-wifi';
+            iconElement.style.color = '#4CAF50';
+        } else {
+            statusElement.textContent = 'Sin conexión';
+            iconElement.className = 'fas fa-wifi-slash';
+            iconElement.style.color = '#f44336';
         }
     }
 
-    logout() {
-        if (!confirm('¿Estás seguro de cerrar sesión?')) {
+    setupForms() {
+        document.getElementById('search-contracts')?.addEventListener('input', (e) => {
+            contracts.filterContracts(e.target.value);
+        });
+
+        document.getElementById('filter-status')?.addEventListener('change', (e) => {
+            certifications.filterByStatus(e.target.value);
+        });
+    }
+
+    showMessage(message, type = 'info') {
+        const messageContainer = document.getElementById('message-container');
+        if (!messageContainer) {
+            alert(message);
             return;
         }
-        
-        this.currentUser = null;
-        localStorage.removeItem('currentUser');
-        localStorage.removeItem('currentCompany');
-        localStorage.removeItem('userCompanies');
-        
-        this.showLogin();
-        this.showMessage('Sesión cerrada exitosamente', 'info');
-    }
 
-    showRegister() {
-        document.getElementById('app-screen').classList.remove('active');
-        document.getElementById('login-screen').classList.remove('active');
-        document.getElementById('register-screen').classList.add('active');
-        
-        // Limpiar formulario
-        document.getElementById('register-name').value = '';
-        document.getElementById('register-email').value = '';
-        document.getElementById('register-password').value = '';
-        document.getElementById('register-confirm').value = '';
-        
-        // Enfocar primer campo
-        document.getElementById('register-name').focus();
-    }
-
-    showLogin() {
-        document.getElementById('app-screen').classList.remove('active');
-        document.getElementById('register-screen').classList.remove('active');
-        document.getElementById('login-screen').classList.add('active');
-        
-        // Limpiar formulario
-        document.getElementById('login-email').value = '';
-        document.getElementById('login-password').value = '';
-        
-        // Enfocar primer campo
-        document.getElementById('login-email').focus();
-    }
-
-    showApp() {
-        document.getElementById('login-screen').classList.remove('active');
-        document.getElementById('register-screen').classList.remove('active');
-        document.getElementById('app-screen').classList.add('active');
-    }
-
-    updateUI() {
-        const userNameElement = document.getElementById('user-name');
-        if (userNameElement && this.currentUser) {
-            userNameElement.textContent = this.currentUser.name;
-        }
-    }
-
-    hashPassword(password) {
-        // En una aplicación real, usarías un hash seguro como bcrypt
-        // Esta es una implementación básica solo para demostración
-        return btoa(password);
-    }
-
-    validateEmail(email) {
-        const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        return re.test(email);
-    }
-
-    showLoading(show) {
-        const loginBtn = document.getElementById('login-btn');
-        const registerBtn = document.getElementById('register-btn');
-        
-        if (loginBtn) {
-            if (show) {
-                loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando...';
-                loginBtn.disabled = true;
-            } else {
-                loginBtn.innerHTML = 'Ingresar';
-                loginBtn.disabled = false;
-            }
-        }
-        
-        if (registerBtn) {
-            if (show) {
-                registerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
-                registerBtn.disabled = true;
-            } else {
-                registerBtn.innerHTML = 'Crear Cuenta';
-                registerBtn.disabled = false;
-            }
-        }
-    }
-
-    showMessage(message, type) {
-        // Eliminar mensaje anterior si existe
-        const existingMessage = document.querySelector('.message');
-        if (existingMessage) {
-            existingMessage.remove();
-        }
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message message-${type}`;
-        messageDiv.textContent = message;
-        
-        // Estilos CSS
-        messageDiv.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 15px 20px;
-            border-radius: 5px;
-            color: white;
-            font-weight: bold;
-            z-index: 10000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            animation: slideIn 0.3s ease;
+        const messageElement = document.createElement('div');
+        messageElement.className = `message message-${type}`;
+        messageElement.innerHTML = `
+            <span>${message}</span>
+            <button onclick="this.parentElement.remove()">&times;</button>
         `;
-        
-        // Colores según tipo
-        const colors = {
-            success: '#4caf50',
-            error: '#f44336',
-            info: '#2196f3',
-            warning: '#ff9800'
-        };
-        
-        messageDiv.style.background = colors[type] || colors.info;
-        
-        document.body.appendChild(messageDiv);
-        
-        // Remover después de 3 segundos
+
+        messageContainer.appendChild(messageElement);
+
         setTimeout(() => {
-            messageDiv.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => {
-                if (messageDiv.parentNode) {
-                    messageDiv.parentNode.removeChild(messageDiv);
-                }
-            }, 300);
-        }, 3000);
-        
-        // Agregar animaciones CSS si no existen
-        if (!document.querySelector('#message-animations')) {
-            const style = document.createElement('style');
-            style.id = 'message-animations';
-            style.textContent = `
-                @keyframes slideIn {
-                    from {
-                        transform: translateX(100%);
-                        opacity: 0;
-                    }
-                    to {
-                        transform: translateX(0);
-                        opacity: 1;
-                    }
-                }
-                @keyframes slideOut {
-                    from {
-                        transform: translateX(0);
-                        opacity: 1;
-                    }
-                    to {
-                        transform: translateX(100%);
-                        opacity: 0;
-                    }
-                }
-            `;
-            document.head.appendChild(style);
+            if (messageElement.parentElement) {
+                messageElement.remove();
+            }
+        }, 5000);
+    }
+}
+
+// Modal Manager
+class ModalManager {
+    constructor() {
+        this.currentSaveCallback = null;
+    }
+
+    show(options = {}) {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+
+        if (!modal || !title || !body) return;
+
+        title.textContent = options.title || 'Modal';
+        body.innerHTML = options.body || '';
+        this.currentSaveCallback = options.onSave || null;
+
+        modal.style.display = 'block';
+    }
+
+    hide() {
+        const modal = document.getElementById('modal');
+        if (modal) modal.style.display = 'none';
+        this.currentSaveCallback = null;
+    }
+
+    async save() {
+        if (this.currentSaveCallback) {
+            try {
+                await this.currentSaveCallback();
+            } catch (error) {
+                console.error('Error al guardar:', error);
+            }
         }
     }
 }
 
-// Inicializar autenticación
-let auth;
+// Dashboard Manager
+class DashboardManager {
+    constructor() {
+        this.init();
+    }
+
+    init() {
+        document.addEventListener('companyChanged', () => this.loadDashboardData());
+    }
+
+    async loadDashboardData() {
+        if (!window.auth?.currentUser || !window.companies?.currentCompany) {
+            this.clearDashboard();
+            return;
+        }
+
+        try {
+            const companyId = companies.currentCompany.id;
+            const [contractsData, certificationsData, paymentsData, activitiesData] = await Promise.all([
+                db.getAll('contracts', 'companyId', companyId),
+                db.getAll('certifications', 'companyId', companyId),
+                db.getAll('payments', 'companyId', companyId),
+                db.getAll('activities', 'companyId', companyId)
+            ]);
+
+            this.updateStats(contractsData, certificationsData, paymentsData);
+            this.renderRecentActivity(activitiesData);
+        } catch (error) {
+            console.error('Error al cargar dashboard:', error);
+        }
+    }
+
+    updateStats(contracts, certifications, payments) {
+        const activeContracts = contracts.filter(contract => contract.status === 'activo').length;
+        const pendingCerts = certifications.filter(cert => cert.status === 'pendiente').length;
+
+        let salaryToPay = 0;
+        let salaryPaid = 0;
+
+        certifications.forEach(cert => {
+            const contract = contracts.find(c => c.id === cert.contractId);
+            if (contract) {
+                const generated = window.contractAppUtils.calculateSalaryAmount(cert.amount, contract.salaryPercentage || 0);
+                const certPaid = payments
+                    .filter(payment => payment.purpose === 'salary' || (!payment.purpose && payment.certificationId))
+                    .flatMap(payment => {
+                        if (Array.isArray(payment.allocations) && payment.allocations.length > 0) {
+                            return payment.allocations;
+                        }
+                        return [{
+                            certificationId: payment.certificationId,
+                            amount: payment.appliedAmount ?? payment.amount ?? 0
+                        }];
+                    })
+                    .filter(allocation => allocation.certificationId === cert.id)
+                    .reduce((sum, allocation) => sum + window.contractAppUtils.toNumber(allocation.amount), 0);
+
+                salaryToPay += Math.max(0, generated - certPaid);
+                salaryPaid += certPaid;
+            }
+        });
+
+        document.getElementById('active-contracts').textContent = activeContracts;
+        document.getElementById('pending-certs').textContent = pendingCerts;
+        document.getElementById('salary-to-pay').textContent = window.contractAppUtils.formatCurrency(salaryToPay);
+        document.getElementById('salary-paid').textContent = window.contractAppUtils.formatCurrency(salaryPaid);
+    }
+
+    renderRecentActivity(activities) {
+        const activityList = document.getElementById('activity-list');
+        if (!activityList) return;
+
+        const sortedActivities = activities
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+            .slice(0, 10);
+
+        if (sortedActivities.length === 0) {
+            activityList.innerHTML = '<p style="text-align: center; color: #666;">No hay actividad reciente</p>';
+            return;
+        }
+
+        activityList.innerHTML = sortedActivities.map(activity => `
+            <div class="activity-item">
+                <div class="activity-icon">
+                    <i class="fas ${this.getActivityIcon(activity.type)}"></i>
+                </div>
+                <div class="activity-content">
+                    <p>${activity.description}</p>
+                    <small>${new Date(activity.createdAt).toLocaleString('es-ES')}</small>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    getActivityIcon(type) {
+        const icons = {
+            company_create: 'fa-building',
+            company_update: 'fa-edit',
+            contract_create: 'fa-file-contract',
+            contract_update: 'fa-edit',
+            certification_create: 'fa-certificate',
+            payment_create: 'fa-money-bill-wave',
+            invoice_create: 'fa-receipt'
+        };
+        return icons[type] || 'fa-info-circle';
+    }
+
+    clearDashboard() {
+        document.getElementById('active-contracts').textContent = '0';
+        document.getElementById('pending-certs').textContent = '0';
+        document.getElementById('salary-to-pay').textContent = '$0.00';
+        document.getElementById('salary-paid').textContent = '$0.00';
+        document.getElementById('activity-list').innerHTML = '<p style="text-align: center; color: #666;">No hay actividad reciente</p>';
+    }
+}
+
+// Instancias globales
+let app;
+let modal;
+let dashboard;
+
 document.addEventListener('DOMContentLoaded', async () => {
-    await db.ready();
-    auth = new Auth();
-    window.auth = auth;
+    await registerServiceWorker();
+
+    modal = new ModalManager();
+    dashboard = new DashboardManager();
+    app = new ContractManagerApp();
+
+    window.modal = modal;
+    window.dashboard = dashboard;
+    window.app = app;
 });
