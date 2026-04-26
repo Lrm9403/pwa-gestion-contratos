@@ -12,6 +12,7 @@ class Auth {
                 this.currentUser = JSON.parse(savedUser);
                 this.updateUI();
                 this.showApp();
+                window.supabaseSync?.syncUserData?.(this.currentUser.id);
             } catch (error) {
                 console.error('Error al parsear usuario guardado:', error);
                 localStorage.removeItem('currentUser');
@@ -79,7 +80,15 @@ class Auth {
             // Esperar a que la base de datos esté lista
             await db.ready();
             
-            const user = await db.getUserByEmail(email);
+            let user = await db.getUserByEmail(email);
+
+            if (!user && window.supabaseSync?.canSync?.()) {
+                const remoteUser = await window.supabaseSync.fetchUserByEmail(email);
+                if (remoteUser) {
+                    await db.putWithId('users', remoteUser);
+                    user = remoteUser;
+                }
+            }
             
             if (!user || user.password !== this.hashPassword(password)) {
                 this.showMessage('Email o contraseña incorrectos', 'error');
@@ -115,6 +124,8 @@ class Auth {
             if (window.companies) {
                 await companies.loadCompanies();
             }
+
+            await window.supabaseSync?.syncUserData?.(user.id);
             
         } catch (error) {
             console.error('Error al iniciar sesión:', error);
@@ -187,6 +198,8 @@ class Auth {
                 type: 'register',
                 description: 'Nuevo usuario registrado'
             });
+
+            await window.supabaseSync?.syncUserData?.(userId);
             
         } catch (error) {
             console.error('Error al crear la cuenta:', error);
