@@ -16,21 +16,46 @@ class Salary {
         }
 
         try {
-            const [contractsList, certificationsList, paymentsList] = await Promise.all([
+            const [contractsList, certificationsList, paymentsList, invoicesList] = await Promise.all([
                 db.getAll('contracts', 'companyId', companies.currentCompany.id),
                 db.getAll('certifications', 'companyId', companies.currentCompany.id),
-                db.getAll('payments', 'companyId', companies.currentCompany.id)
+                db.getAll('payments', 'companyId', companies.currentCompany.id),
+                db.getAll('invoices', 'companyId', companies.currentCompany.id)
             ]);
 
             const paidMap = new Map();
-            paymentsList
-                .filter(payment => payment.purpose === 'salary')
-                .forEach(payment => {
-                    (payment.allocations || []).forEach(allocation => {
-                        if (!allocation.certificationId) return;
+            const invoicePaidMap = new Map();
+            paymentsList.forEach(payment => {
+                const isSalary = payment.purpose === 'salary' || (!payment.purpose && payment.certificationId);
+                if (isSalary) {
+                    const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                        ? payment.allocations
+                        : [{ certificationId: payment.certificationId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+                    allocations.forEach(allocation => {
+                        if (!allocation?.certificationId) return;
                         paidMap.set(allocation.certificationId, this.utils.roundMoney((paidMap.get(allocation.certificationId) || 0) + this.utils.toNumber(allocation.amount)));
                     });
+                }
+                if (payment.purpose === 'invoice' || (!payment.purpose && payment.invoiceId)) {
+                    const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                        ? payment.allocations
+                        : [{ invoiceId: payment.invoiceId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+                    allocations.forEach(allocation => {
+                        if (!allocation?.invoiceId) return;
+                        invoicePaidMap.set(allocation.invoiceId, this.utils.roundMoney((invoicePaidMap.get(allocation.invoiceId) || 0) + this.utils.toNumber(allocation.amount)));
+                    });
+                }
+            });
+
+            const canPayCertification = (certification) => {
+                const relatedInvoices = invoicesList.filter(invoice => invoice.certificationId === certification.id);
+                if (relatedInvoices.length === 0) return false;
+                return relatedInvoices.every(invoice => {
+                    if ((invoice.manualStatus || invoice.status) === 'pagado') return true;
+                    const paid = invoicePaidMap.get(invoice.id) || 0;
+                    return paid >= this.utils.toNumber(invoice.amount);
                 });
+            };
 
             const salaryRows = certificationsList
                 .map(certification => {
@@ -43,7 +68,8 @@ class Salary {
                         contract,
                         generated,
                         paid,
-                        pending
+                        pending,
+                        eligible: canPayCertification(certification)
                     };
                 })
                 .sort((a, b) => this.utils.comparePeriods(a.certification, b.certification));
@@ -88,9 +114,10 @@ class Salary {
                 <td>${this.utils.formatCurrency(item.paid)}</td>
                 <td>${this.utils.formatCurrency(item.pending)}</td>
                 <td>
-                    <button class="btn btn-sm btn-primary" onclick="salary.paySalary('${item.contract?.id || ''}', '${item.certification.id}')" ${item.pending <= 0 ? 'disabled' : ''}>
+                    <button class="btn btn-sm btn-primary" onclick="salary.paySalary('${item.contract?.id || ''}', '${item.certification.id}')" ${item.pending <= 0 || !item.eligible ? 'disabled' : ''}>
                         <i class="fas fa-money-bill-wave"></i> Pagar
                     </button>
+                    ${!item.eligible ? '<br><small>Factura no pagada</small>' : ''}
                 </td>
             `;
             tbody.appendChild(row);
@@ -120,13 +147,13 @@ class Salary {
                     purpose.value = 'salary';
                     purpose.dispatchEvent(new Event('change'));
                 }
-                if (mode) {
-                    mode.value = certificationId ? 'manual' : 'automatic';
-                    mode.dispatchEvent(new Event('change'));
-                }
                 if (contractFilter && contractId) {
                     contractFilter.value = contractId;
                     contractFilter.dispatchEvent(new Event('change'));
+                }
+                if (mode) {
+                    mode.value = certificationId ? 'manual' : 'automatic';
+                    mode.dispatchEvent(new Event('change'));
                 }
                 if (certificationId) {
                     setTimeout(() => {
