@@ -80,12 +80,18 @@ class Certifications {
         const { certificationsList, invoicesList, paymentsList } = await this.getCompanyContractsData();
         const paidInvoiceIds = new Set();
         const invoicePaidMap = new Map();
-        paymentsList.filter(p => p.purpose === 'invoice').forEach(payment => {
-            (payment.allocations || []).forEach(a => {
-                const current = invoicePaidMap.get(a.invoiceId) || 0;
-                invoicePaidMap.set(a.invoiceId, current + this.utils.toNumber(a.amount));
+        paymentsList
+            .filter(p => p.purpose === 'invoice' || (!p.purpose && p.invoiceId))
+            .forEach(payment => {
+                const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                    ? payment.allocations
+                    : [{ invoiceId: payment.invoiceId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+                allocations.forEach(a => {
+                    if (!a.invoiceId) return;
+                    const current = invoicePaidMap.get(a.invoiceId) || 0;
+                    invoicePaidMap.set(a.invoiceId, current + this.utils.toNumber(a.amount));
+                });
             });
-        });
 
         invoicesList.forEach(invoice => {
             const paid = invoicePaidMap.get(invoice.id) || 0;
@@ -225,9 +231,26 @@ class Certifications {
             return;
         }
 
-        const contractsList = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
-        const activeContracts = contractsList.filter(contract => (contract.status || 'activo') !== 'suspendido');
-        const contractCatalog = this.buildContractScopeCatalog(activeContracts);
+        const [contractsList, certificationsList] = await Promise.all([
+            db.getAll('contracts', 'companyId', companies.currentCompany.id),
+            db.getAll('certifications', 'companyId', companies.currentCompany.id)
+        ]);
+        const companyTax = this.utils.getCompanyTaxPercentage(companies.currentCompany);
+        const activeContracts = contractsList.filter(contract => (contract.status || 'activo') === 'activo');
+        const selectedScopeId = certification?.scopeId || '';
+        const contractCatalog = this.buildContractScopeCatalog(activeContracts)
+            .map(item => {
+                const scopes = item.scopes.filter(scope => {
+                    const totalWithTax = this.utils.calculateTotalWithTax(scope.amount, companyTax);
+                    const certifiedInScope = certificationsList
+                        .filter(cert => cert.id !== certification?.id && cert.contractId === item.contract.id && (cert.scopeId || `contract:${cert.contractId}`) === scope.value)
+                        .reduce((sum, cert) => sum + this.utils.calculateTotalWithTax(cert.amount, companyTax), 0);
+                    const pending = this.utils.roundMoney(Math.max(0, totalWithTax - certifiedInScope));
+                    return pending > 0 || scope.value === selectedScopeId;
+                });
+                return { ...item, scopes };
+            })
+            .filter(item => item.scopes.length > 0);
         if (contractCatalog.length === 0) {
             this.showMessage('No hay contratos para crear certificaciones', 'error');
             return;
@@ -241,7 +264,7 @@ class Certifications {
             <div class="form-group"><label for="cert-scope">Alcance (base/suplemento) *:</label><select id="cert-scope" required><option value="">Seleccionar alcance</option></select></div>
             <div class="form-group"><label for="cert-month">Mes *:</label><select id="cert-month" required><option value="">Seleccionar mes</option>${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${certification?.month === index + 1 ? 'selected' : ''}>${['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'][index]}</option>`).join('')}</select></div>
             <div class="form-group"><label for="cert-year">Año *:</label><input type="number" id="cert-year" min="2020" max="2100" value="${certification?.year || new Date().getFullYear()}" required></div>
-            <div class="form-group"><label for="cert-amount">Monto certificado ($) *:</label><input type="number" id="cert-amount" step="0.0000001" min="0.0000001" value="${certification?.amount || ''}" required></div>
+            <div class="form-group"><label for="cert-amount">Monto certificado ($) *:</label><input type="number" id="cert-amount" step="0.01" min="0.01" value="${certification?.amount || ''}" required></div>
             <div class="form-group"><label for="cert-status">Estado:</label><select id="cert-status"><option value="pendiente" ${(certification?.status || 'pendiente') === 'pendiente' ? 'selected' : ''}>Pendiente</option><option value="aprobado" ${certification?.status === 'aprobado' ? 'selected' : ''}>Aprobado</option></select></div>
             <div class="form-group"><label for="cert-notes">Notas:</label><textarea id="cert-notes" rows="3">${certification?.notes || ''}</textarea></div>
         `;
@@ -288,7 +311,7 @@ class Certifications {
                 return;
             }
             const companyContracts = await db.getAll('contracts', 'companyId', companies.currentCompany.id);
-            const companyActiveContracts = companyContracts.filter(item => (item.status || 'activo') !== 'suspendido');
+            const companyActiveContracts = companyContracts.filter(item => (item.status || 'activo') === 'activo' || item.id === contractId);
             const contractCatalog = this.buildContractScopeCatalog(companyActiveContracts);
             if (!this.isScopeValidForContract(contractCatalog, contractId, scopeId)) {
                 this.showMessage('El alcance seleccionado no corresponde al contrato', 'error');
