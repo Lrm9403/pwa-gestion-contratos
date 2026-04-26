@@ -184,7 +184,12 @@ class ContractManagerApp {
     }
 
     setupConnectionManager() {
-        window.addEventListener('online', () => this.updateConnectionStatus(true));
+        window.addEventListener('online', async () => {
+            this.updateConnectionStatus(true);
+            if (window.auth?.currentUser?.id) {
+                await window.supabaseSync?.syncUserData?.(window.auth.currentUser.id);
+            }
+        });
         window.addEventListener('offline', () => this.updateConnectionStatus(false));
 
         this.updateConnectionStatus(navigator.onLine);
