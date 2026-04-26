@@ -22,27 +22,33 @@ class Payments {
 
     getSalaryPaidMap(paymentsList) {
         const map = new Map();
-        paymentsList
-            .filter(payment => payment.purpose === 'salary')
-            .forEach(payment => {
-                (payment.allocations || []).forEach(allocation => {
-                    if (!allocation.certificationId) return;
-                    map.set(allocation.certificationId, this.utils.roundMoney((map.get(allocation.certificationId) || 0) + this.utils.toNumber(allocation.amount)));
-                });
+        paymentsList.forEach(payment => {
+            const isSalary = payment.purpose === 'salary' || (!payment.purpose && payment.certificationId);
+            if (!isSalary) return;
+            const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                ? payment.allocations
+                : [{ certificationId: payment.certificationId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+            allocations.forEach(allocation => {
+                if (!allocation?.certificationId) return;
+                map.set(allocation.certificationId, this.utils.roundMoney((map.get(allocation.certificationId) || 0) + this.utils.toNumber(allocation.amount)));
             });
+        });
         return map;
     }
 
     getInvoicePaidMap(paymentsList) {
         const map = new Map();
-        paymentsList
-            .filter(payment => payment.purpose === 'invoice')
-            .forEach(payment => {
-                (payment.allocations || []).forEach(allocation => {
-                    if (!allocation.invoiceId) return;
-                    map.set(allocation.invoiceId, this.utils.roundMoney((map.get(allocation.invoiceId) || 0) + this.utils.toNumber(allocation.amount)));
-                });
+        paymentsList.forEach(payment => {
+            const isInvoice = payment.purpose === 'invoice' || (!payment.purpose && payment.invoiceId);
+            if (!isInvoice) return;
+            const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                ? payment.allocations
+                : [{ invoiceId: payment.invoiceId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+            allocations.forEach(allocation => {
+                if (!allocation.invoiceId) return;
+                map.set(allocation.invoiceId, this.utils.roundMoney((map.get(allocation.invoiceId) || 0) + this.utils.toNumber(allocation.amount)));
             });
+        });
         return map;
     }
 
@@ -68,7 +74,12 @@ class Payments {
             const { contractsList, certificationsList, invoicesList, paymentsList } = await this.getCompanyData();
             const enrichedPayments = paymentsList.map(payment => {
                 const contract = contractsList.find(item => item.id === payment.contractId);
-                const allocationLabels = (payment.allocations || []).map(allocation => {
+                const fallbackAllocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                    ? payment.allocations
+                    : payment.purpose === 'salary' || (!payment.purpose && payment.certificationId)
+                        ? [{ certificationId: payment.certificationId, amount: payment.appliedAmount ?? payment.amount ?? 0 }]
+                        : [{ invoiceId: payment.invoiceId, amount: payment.appliedAmount ?? payment.amount ?? 0 }];
+                const allocationLabels = fallbackAllocations.map(allocation => {
                     if (payment.purpose === 'salary') {
                         const certification = certificationsList.find(item => item.id === allocation.certificationId);
                         return certification ? `Salario ${this.utils.getCertificationPeriodLabel(certification)} (${this.utils.formatCurrency(allocation.amount)})` : `Salario (${this.utils.formatCurrency(allocation.amount)})`;
@@ -81,7 +92,7 @@ class Payments {
                     ...payment,
                     contractCode: contract?.code || 'Todos',
                     contractClient: contract?.client || 'Empresa',
-                    purposeLabel: payment.purpose === 'invoice' ? 'Factura' : 'Salario',
+                    purposeLabel: (payment.purpose === 'invoice' || (!payment.purpose && payment.invoiceId)) ? 'Factura' : 'Salario',
                     applicationLabel: allocationLabels.join(', ') || 'Sin aplicación',
                     paymentDate: payment.date || payment.createdAt?.split('T')[0]
                 };
@@ -240,6 +251,12 @@ class Payments {
                 : unpaidInvoices.filter(item => !selectedContractId || item.contractId === selectedContractId);
 
             targetSelect.innerHTML = '';
+            if (list.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No hay registros disponibles';
+                targetSelect.appendChild(option);
+            }
             if (purpose === 'salary') {
                 list.forEach(certification => {
                     const contract = contractsList.find(item => item.id === certification.contractId);
