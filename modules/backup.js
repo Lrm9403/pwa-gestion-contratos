@@ -116,6 +116,7 @@ class BackupManager {
         const companyIdMap = new Map();
         const contractIdMap = new Map();
         const certificationIdMap = new Map();
+        const invoiceIdMap = new Map();
         
         // Importar empresas
         if (data.companies && Array.isArray(data.companies)) {
@@ -162,6 +163,7 @@ class BackupManager {
 
         if (data.invoices && Array.isArray(data.invoices)) {
             for (const invoice of data.invoices) {
+                const originalInvoiceId = invoice.id;
                 const invoiceData = {
                     ...invoice,
                     contractId: contractIdMap.get(invoice.contractId) || invoice.contractId,
@@ -169,17 +171,49 @@ class BackupManager {
                     userId: auth.currentUser.id
                 };
                 delete invoiceData.id;
-                await db.add('invoices', invoiceData);
+                const invoiceId = await db.add('invoices', invoiceData);
+                invoiceIdMap.set(originalInvoiceId, invoiceId);
             }
         }
 
         if (data.payments && Array.isArray(data.payments)) {
             for (const payment of data.payments) {
+                const mappedCertificationId = payment.certificationId
+                    ? (certificationIdMap.get(payment.certificationId) || payment.certificationId)
+                    : null;
+                const mappedContractId = contractIdMap.get(payment.contractId) || payment.contractId || null;
+                const allocations = Array.isArray(payment.allocations) && payment.allocations.length > 0
+                    ? payment.allocations.map(allocation => ({
+                        ...allocation,
+                        certificationId: allocation.certificationId
+                            ? (certificationIdMap.get(allocation.certificationId) || allocation.certificationId)
+                            : null,
+                        invoiceId: allocation.invoiceId
+                            ? (invoiceIdMap.get(allocation.invoiceId) || allocation.invoiceId)
+                            : null
+                    }))
+                    : (mappedCertificationId || payment.invoiceId)
+                        ? [{
+                            certificationId: mappedCertificationId,
+                            invoiceId: payment.invoiceId
+                                ? (invoiceIdMap.get(payment.invoiceId) || payment.invoiceId)
+                                : null,
+                            amount: payment.appliedAmount || payment.amount || 0
+                        }]
+                        : [];
+                const normalizedPurpose = payment.purpose
+                    || (mappedCertificationId ? 'salary' : (payment.invoiceId ? 'invoice' : 'invoice'));
                 const paymentData = {
                     ...payment,
-                    contractId: contractIdMap.get(payment.contractId) || payment.contractId,
+                    purpose: normalizedPurpose,
+                    contractId: mappedContractId,
                     companyId: companyIdMap.get(payment.companyId) || payment.companyId,
-                    certificationId: payment.certificationId ? (certificationIdMap.get(payment.certificationId) || payment.certificationId) : null,
+                    certificationId: mappedCertificationId,
+                    invoiceId: payment.invoiceId
+                        ? (invoiceIdMap.get(payment.invoiceId) || payment.invoiceId)
+                        : null,
+                    allocations,
+                    appliedAmount: (payment.appliedAmount ?? payment.amount ?? 0),
                     userId: auth.currentUser.id
                 };
                 delete paymentData.id;
