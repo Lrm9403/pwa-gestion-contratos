@@ -11,7 +11,7 @@ window.contractAppUtils = {
     },
 
     roundMoney(value) {
-        return this.toNumber(value);
+        return Number.parseFloat(this.toNumber(value).toFixed(2));
     },
 
     parsePercentageInput(rawValue) {
@@ -30,8 +30,8 @@ window.contractAppUtils = {
     },
 
     formatCurrency(value) {
-        const number = this.toNumber(value);
-        return `$${number.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
+        const number = this.roundMoney(value);
+        return `$${number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     },
 
     getCompanyTaxPercentage(company) {
@@ -322,8 +322,16 @@ class DashboardManager {
             if (contract) {
                 const generated = window.contractAppUtils.calculateSalaryAmount(cert.amount, contract.salaryPercentage || 0);
                 const certPaid = payments
-                    .filter(payment => payment.purpose === 'salary')
-                    .flatMap(payment => payment.allocations || [])
+                    .filter(payment => payment.purpose === 'salary' || (!payment.purpose && payment.certificationId))
+                    .flatMap(payment => {
+                        if (Array.isArray(payment.allocations) && payment.allocations.length > 0) {
+                            return payment.allocations;
+                        }
+                        return [{
+                            certificationId: payment.certificationId,
+                            amount: payment.appliedAmount ?? payment.amount ?? 0
+                        }];
+                    })
                     .filter(allocation => allocation.certificationId === cert.id)
                     .reduce((sum, allocation) => sum + window.contractAppUtils.toNumber(allocation.amount), 0);
 
