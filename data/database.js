@@ -1,7 +1,7 @@
 class Database {
     constructor() {
         this.dbName = 'ContractManagerDB';
-        this.version = 2; // Incrementada para crear el store de facturas
+        this.version = 3;
         this.db = null;
         this.initPromise = this.init();
     }
@@ -71,11 +71,38 @@ class Database {
             
             // Generar ID único
             const id = 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            const item = { ...data, id };
+            const item = { ...data, id, updatedAt: new Date().toISOString() };
             
             const request = store.add(item);
             
-            request.onsuccess = () => resolve(id);
+            request.onsuccess = async () => {
+                try {
+                    await window.supabaseSync?.pushChange({
+                        storeName,
+                        record: item,
+                        operation: 'upsert'
+                    });
+                } catch (error) {
+                    console.warn('No se pudo sincronizar el registro nuevo:', error);
+                }
+                resolve(id);
+            };
+            request.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    async putWithId(storeName, data) {
+        await this.ready();
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([storeName], 'readwrite');
+            const store = transaction.objectStore(storeName);
+            const request = store.put({
+                ...data,
+                updatedAt: data.updatedAt || new Date().toISOString()
+            });
+
+            request.onsuccess = () => resolve(data.id);
             request.onerror = (e) => reject(e.target.error);
         });
     }
@@ -86,24 +113,53 @@ class Database {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([storeName], 'readwrite');
             const store = transaction.objectStore(storeName);
-            const request = store.put({ ...data, id });
+            const request = store.put({ ...data, id, updatedAt: new Date().toISOString() });
             
-            request.onsuccess = () => resolve(id);
+            request.onsuccess = async () => {
+                try {
+                    await window.supabaseSync?.pushChange({
+                        storeName,
+                        record: { ...data, id, updatedAt: new Date().toISOString() },
+                        operation: 'upsert'
+                    });
+                } catch (error) {
+                    console.warn('No se pudo sincronizar la actualización:', error);
+                }
+                resolve(id);
+            };
             request.onerror = (e) => reject(e.target.error);
         });
     }
 
     async delete(storeName, id) {
         await this.ready();
+        const existingRecord = await this.get(storeName, id);
         
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([storeName], 'readwrite');
             const store = transaction.objectStore(storeName);
             const request = store.delete(id);
             
-            request.onsuccess = () => resolve(id);
+            request.onsuccess = async () => {
+                try {
+                    if (existingRecord) {
+                        await window.supabaseSync?.pushChange({
+                            storeName,
+                            record: existingRecord,
+                            operation: 'delete'
+                        });
+                    }
+                } catch (error) {
+                    console.warn('No se pudo sincronizar la eliminación:', error);
+                }
+                resolve(id);
+            };
             request.onerror = (e) => reject(e.target.error);
         });
+    }
+
+    async deleteLocalOnly(storeName, id) {
+        return this.delete(storeName, id);
     }
 
     async get(storeName, id) {
